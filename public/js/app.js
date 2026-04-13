@@ -733,7 +733,7 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     preview.textContent = 'Fetching rate…';
     try {
       const date = dateVal || new Date().toISOString().split('T')[0];
-      const url = `https://api.frankfurter.dev/${date}?from=${expCurrency}&to=${trip.currency}&amount=${amountVal}`;
+      const url = `https://api.frankfurter.dev/v1/${date}?from=${expCurrency}&to=${trip.currency}&amount=${amountVal}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Rate unavailable');
       const data = await res.json();
@@ -797,7 +797,7 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
         // Fallback: try one more fetch; if fails, use 1:1
         try {
           const date2 = date || new Date().toISOString().split('T')[0];
-          const url = `https://api.frankfurter.dev/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
+          const url = `https://api.frankfurter.dev/v1/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
           const res = await fetch(url);
           if (!res.ok) throw new Error('rate fetch failed');
           const data = await res.json();
