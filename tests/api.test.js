@@ -217,6 +217,27 @@ describe('Trips API', () => {
     describe('Expenses', () => {
       let expenseId;
 
+      it('POST /api/trips/:id/expenses adds an expense with foreign currency', async () => {
+        const { status, body } = await req('POST', `/api/trips/${tripId}/expenses`, {
+          description: 'Foreign Dinner',
+          amount: 49.12,
+          paidBy: aliceId,
+          splitBetween: [aliceId, bobId],
+          date: '2024-07-15',
+          originalCurrency: 'USD',
+          originalAmount: 45.00,
+          convertedAmount: 49.12,
+        });
+        assert.equal(status, 201);
+        assert.equal(body.description, 'Foreign Dinner');
+        assert.equal(body.amount, 49.12);
+        assert.equal(body.originalCurrency, 'USD');
+        assert.equal(body.originalAmount, 45.00);
+        assert.equal(body.convertedAmount, 49.12);
+        // Clean up so it doesn't affect balance tests
+        await req('DELETE', `/api/trips/${tripId}/expenses/${body.id}`);
+      });
+
       it('POST /api/trips/:id/expenses adds an expense', async () => {
         const { status, body } = await req('POST', `/api/trips/${tripId}/expenses`, {
           description: 'Hotel',
@@ -252,6 +273,33 @@ describe('Trips API', () => {
         assert.equal(bob.balance, -100);   // paid 0, owed 100 → -100
         assert.equal(body.settlements.length, 1);
         assert.equal(body.settlements[0].amount, 100);
+      });
+
+      it('PUT /api/trips/:id/expenses/:eid preserves original currency info', async () => {
+        // Create a foreign-currency expense first
+        const { body: fe } = await req('POST', `/api/trips/${tripId}/expenses`, {
+          description: 'Museum',
+          amount: 22.00,
+          paidBy: aliceId,
+          splitBetween: [aliceId],
+          date: '2024-07-16',
+          originalCurrency: 'GBP',
+          originalAmount: 18.00,
+          convertedAmount: 22.00,
+        });
+        // Update only the description — conversion data should survive
+        const { status, body } = await req(
+          'PUT',
+          `/api/trips/${tripId}/expenses/${fe.id}`,
+          { description: 'Museum Visit' }
+        );
+        assert.equal(status, 200);
+        assert.equal(body.description, 'Museum Visit');
+        assert.equal(body.originalCurrency, 'GBP');
+        assert.equal(body.originalAmount, 18.00);
+        assert.equal(body.convertedAmount, 22.00);
+        // Clean up
+        await req('DELETE', `/api/trips/${tripId}/expenses/${fe.id}`);
       });
 
       it('PUT /api/trips/:id/expenses/:eid updates an expense', async () => {

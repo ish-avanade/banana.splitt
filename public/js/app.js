@@ -351,6 +351,13 @@ function renderExpensesTab(trip, tripId) {
 
     const item = document.createElement('div');
     item.className = 'expense-item';
+
+    // Determine whether to show dual-currency display safely via DOM (not innerHTML)
+    const showConversion = expense.originalCurrency
+      && expense.originalCurrency !== trip.currency
+      && typeof expense.originalAmount === 'number';
+
+    // Use a placeholder token that we'll replace via DOM after setting innerHTML
     item.innerHTML = `
       <div class="expense-icon">💸</div>
       <div class="expense-body">
@@ -361,12 +368,29 @@ function renderExpensesTab(trip, tripId) {
           · <time>${expense.date}</time>
         </div>
       </div>
-      <div class="expense-amount">${fmt(expense.amount, trip.currency)}</div>
+      <div class="expense-amount"></div>
       <div class="expense-actions">
         <button class="btn btn-ghost btn-sm edit-expense-btn" aria-label="Edit expense" title="Edit">✏️</button>
         <button class="btn btn-ghost btn-sm delete-expense-btn" aria-label="Delete expense" title="Delete">🗑️</button>
       </div>
     `;
+
+    // Populate amount cell with safe DOM nodes to avoid Intl.NumberFormat throws and XSS
+    const amountCell = item.querySelector('.expense-amount');
+    if (showConversion) {
+      let origText, convText;
+      try { origText = fmt(expense.originalAmount, expense.originalCurrency); } catch { origText = String(expense.originalAmount); }
+      try { convText = fmt(expense.amount, trip.currency); } catch { convText = String(expense.amount); }
+      amountCell.appendChild(document.createTextNode(origText));
+      const note = document.createElement('span');
+      note.className = 'conversion-note';
+      note.textContent = `(≈ ${convText})`;
+      amountCell.appendChild(note);
+    } else {
+      let mainText;
+      try { mainText = fmt(expense.amount, trip.currency); } catch { mainText = String(expense.amount); }
+      amountCell.textContent = mainText;
+    }
     item.querySelector('.edit-expense-btn').addEventListener('click', () =>
       showEditExpenseModal(trip, expense, () => renderTripDetail(tripId))
     );
@@ -611,6 +635,10 @@ function expenseModalHTML(trip, expense, prefill = null) {
   const vals = expense || prefill;
   const splitIds = vals?.splitBetween || participants.map((p) => p.id);
 
+  // When editing, show original amount if a foreign currency was used
+  const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : (vals?.amount || ''));
+  const expCurrency = expense?.originalCurrency || trip.currency;
+
   return `
     <h2 class="modal-title">${expense ? 'Edit Expense' : 'Add Expense'}</h2>
     <form id="expense-form">
@@ -620,9 +648,17 @@ function expenseModalHTML(trip, expense, prefill = null) {
           value="${escAttr(vals?.description || '')}" required maxlength="120" />
       </div>
       <div class="form-group">
-        <label for="exp-amount">Amount (${escHtml(trip.currency)}) *</label>
-        <input id="exp-amount" type="number" step="0.01" min="0.01"
-          value="${vals?.amount || ''}" required placeholder="0.00" />
+        <label for="exp-amount">Amount *</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input id="exp-amount" type="number" step="0.01" min="0.01"
+            value="${escAttr(String(displayAmount))}" required placeholder="0.00" style="flex:1" />
+          <select id="exp-currency" style="width:7rem">
+            ${CURRENCIES.map((c) =>
+              `<option value="${c.code}"${c.code === expCurrency ? ' selected' : ''}>${c.code}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div id="conversion-preview" style="font-size:.8rem;color:var(--text-muted);margin-top:.25rem;min-height:1.2em"></div>
       </div>
       <div class="form-group">
         <label for="exp-date">Date</label>
@@ -679,12 +715,69 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       cb.checked = true;
     });
   });
+
+  // Live conversion preview
+  let conversionRate = null;
+  let lastConvertedAmount = null;
+  let conversionTimeout = null;
+
+  async function updateConversionPreview() {
+    const amountVal = parseFloat(document.getElementById('exp-amount').value);
+    const expCurrency = document.getElementById('exp-currency').value;
+    const dateVal = document.getElementById('exp-date').value;
+    const preview = document.getElementById('conversion-preview');
+
+    if (expCurrency === trip.currency || !amountVal || amountVal <= 0) {
+      preview.textContent = '';
+      conversionRate = null;
+      lastConvertedAmount = null;
+      return;
+    }
+
+    preview.textContent = 'Fetching rate…';
+    try {
+      const date = dateVal || new Date().toISOString().split('T')[0];
+      const url = `https://api.frankfurter.dev/${date}?from=${expCurrency}&to=${trip.currency}&amount=${amountVal}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Rate unavailable');
+      const data = await res.json();
+      const converted = data.rates[trip.currency];
+      if (typeof converted !== 'number') throw new Error('Rate unavailable');
+      conversionRate = converted / amountVal;
+      lastConvertedAmount = Math.round(converted * 100) / 100;
+      preview.textContent = `≈ ${fmt(lastConvertedAmount, trip.currency)} at ${conversionRate.toFixed(4)} rate`;
+    } catch {
+      conversionRate = null;
+      lastConvertedAmount = null;
+      preview.textContent = 'Could not fetch rate — will use 1:1';
+    }
+  }
+
+  function schedulePreviewUpdate() {
+    clearTimeout(conversionTimeout);
+    conversionTimeout = setTimeout(updateConversionPreview, 500);
+  }
+
+  document.getElementById('exp-amount').addEventListener('input', schedulePreviewUpdate);
+  document.getElementById('exp-currency').addEventListener('change', updateConversionPreview);
+  document.getElementById('exp-date').addEventListener('change', updateConversionPreview);
+
+  // Show initial preview if editing a foreign-currency expense
+  if (expense?.originalCurrency && expense.originalCurrency !== trip.currency) {
+    const preview = document.getElementById('conversion-preview');
+    const rate = expense.originalAmount > 0
+      ? (expense.convertedAmount / expense.originalAmount).toFixed(4)
+      : '1.0000';
+    preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
+  }
+
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const description = document.getElementById('exp-desc').value.trim();
-    const amount      = parseFloat(document.getElementById('exp-amount').value);
     const date        = document.getElementById('exp-date').value;
     const paidBy      = document.getElementById('exp-paidby').value;
+    const expCurrency = document.getElementById('exp-currency').value;
+    const rawAmount   = parseFloat(document.getElementById('exp-amount').value);
     const splitBetween = [...document.querySelectorAll('#split-checkboxes input:checked')]
       .map((cb) => cb.value);
 
@@ -693,15 +786,53 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
+    // Determine final amount in trip currency and optional conversion fields
+    let amount = rawAmount;
+    let extraFields = {};
+
+    if (expCurrency !== trip.currency) {
+      if (conversionRate !== null) {
+        // Use lastConvertedAmount when amount matches the preview, else reapply rate
+        const previewAmount = parseFloat(document.getElementById('exp-amount').value);
+        amount = lastConvertedAmount !== null && previewAmount === rawAmount
+          ? lastConvertedAmount
+          : Math.round(rawAmount * conversionRate * 100) / 100;
+      } else {
+        // Fallback: try one more fetch; if fails, use 1:1
+        try {
+          const date2 = date || new Date().toISOString().split('T')[0];
+          const url = `https://api.frankfurter.dev/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('rate fetch failed');
+          const data = await res.json();
+          const converted = data.rates?.[trip.currency];
+          if (typeof converted !== 'number') throw new Error('rate missing');
+          amount = Math.round(converted * 100) / 100;
+        } catch {
+          toast('Exchange rate unavailable — using 1:1 conversion', 'error');
+        }
+      }
+      extraFields = {
+        originalCurrency: expCurrency,
+        originalAmount: rawAmount,
+        convertedAmount: amount,
+      };
+    } else {
+      // Same currency — clear any previous conversion data when editing
+      if (expense?.originalCurrency) {
+        extraFields = { originalCurrency: trip.currency };
+      }
+    }
+
     try {
       if (expense) {
         await put(`/trips/${trip.id}/expenses/${expense.id}`, {
-          description, amount, date, paidBy, splitBetween,
+          description, amount, date, paidBy, splitBetween, ...extraFields,
         });
         toast('Expense updated', 'success');
       } else {
         await post(`/trips/${trip.id}/expenses`, {
-          description, amount, date, paidBy, splitBetween,
+          description, amount, date, paidBy, splitBetween, ...extraFields,
         });
         toast('Expense added 💸', 'success');
       }

@@ -253,6 +253,7 @@ main#main-content {
 .expense-desc { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .expense-meta { font-size: .78rem; color: var(--text-muted); margin-top: .1rem; }
 .expense-amount { font-size: 1.15rem; font-weight: 800; text-align: right; min-width: 70px; }
+.expense-amount .conversion-note { display: block; font-size: .75rem; font-weight: 500; color: var(--text-muted); }
 .expense-actions { display: flex; gap: .25rem; }
 
 /* ---- Dashboard cards -------------------------------------- */
