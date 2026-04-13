@@ -306,6 +306,11 @@ async function renderTripDetail(tripId) {
       shareBalancesSummary(tripId, trip)
     );
 
+    // Generate summary button
+    main.querySelector('#btn-generate-summary').addEventListener('click', () =>
+      shareTripSummary(tripId, trip)
+    );
+
     renderExpensesTab(trip, tripId);
     renderMembersTab(trip, tripId);
     renderDashboard(trip);
@@ -559,6 +564,108 @@ async function shareBalancesSummary(tripId, trip) {
     } else {
       await navigator.clipboard.writeText(text);
       toast('Summary copied to clipboard!', 'success');
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      toast(err.message, 'error');
+    }
+  }
+}
+
+// ---- Narrative trip summary ----
+
+function generateTripSummary(trip, balances, settlements) {
+  const total = trip.expenses.reduce((s, e) => s + e.amount, 0);
+  const count = trip.expenses.length;
+  const memberCount = trip.participants.length;
+
+  // Top payer by amount paid
+  const paidByPerson = {};
+  for (const e of trip.expenses) {
+    if (!paidByPerson[e.paidBy]) {
+      const p = trip.participants.find((p) => p.id === e.paidBy);
+      paidByPerson[e.paidBy] = { name: p ? p.name : '?', amount: 0 };
+    }
+    paidByPerson[e.paidBy].amount += e.amount;
+  }
+  const topPayer = Object.values(paidByPerson).sort((a, b) => b.amount - a.amount)[0];
+
+  // Biggest single expense
+  const biggest = count > 0
+    ? trip.expenses.reduce((max, e) => (e.amount > max.amount ? e : max), trip.expenses[0])
+    : null;
+
+  // Top category (if any expenses have a category field)
+  const hasCats = trip.expenses.some((e) => e.category);
+  let topCatLine = '';
+  if (hasCats) {
+    const catTotals = {};
+    for (const e of trip.expenses) {
+      const cat = e.category || 'Other';
+      catTotals[cat] = (catTotals[cat] || 0) + e.amount;
+    }
+    const topCat = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
+    if (topCat) {
+      const pct = total > 0 ? Math.round((topCat[1] / total) * 100) : 0;
+      topCatLine = ` ${topCat[0]} was the biggest category at ${pct}% (${fmt(topCat[1], trip.currency)}).`;
+    }
+  }
+
+  // Date range
+  let dateLine = '';
+  if (count > 0) {
+    const dates = trip.expenses.map((e) => e.date).sort();
+    if (dates[0] === dates[dates.length - 1]) {
+      dateLine = ` on ${dates[0]}`;
+    } else {
+      dateLine = ` from ${dates[0]} to ${dates[dates.length - 1]}`;
+    }
+  }
+
+  let text = `🍌 ${trip.name} Summary\n`;
+  text += '━'.repeat(30) + '\n\n';
+
+  if (count === 0) {
+    text += `No expenses recorded yet for this trip.`;
+    return text;
+  }
+
+  text += `The group spent ${fmt(total, trip.currency)} across ${count} expense${count !== 1 ? 's' : ''} with ${memberCount} member${memberCount !== 1 ? 's' : ''}${dateLine}.`;
+
+  if (topPayer && topPayer.amount > 0) {
+    text += ` ${topPayer.name} covered the most (${fmt(topPayer.amount, trip.currency)}).`;
+  }
+
+  if (biggest) {
+    text += ` The biggest single expense was "${biggest.description}" at ${fmt(biggest.amount, trip.currency)}.`;
+  }
+
+  if (topCatLine) text += topCatLine;
+
+  text += '\n\n';
+
+  if (settlements.length > 0) {
+    text += '💸 To settle up:\n';
+    for (const s of settlements) {
+      text += `  ${s.fromName} pays ${fmt(s.amount, trip.currency)} to ${s.toName}\n`;
+    }
+  } else {
+    text += '🎉 All settled up! No payments needed.';
+  }
+
+  return text;
+}
+
+async function shareTripSummary(tripId, trip) {
+  try {
+    const { balances, settlements } = await get(`/trips/${tripId}/balances`);
+    const text = generateTripSummary(trip, balances, settlements);
+
+    if (navigator.share) {
+      await navigator.share({ title: `🍌 ${trip.name} Summary`, text });
+    } else {
+      await navigator.clipboard.writeText(text);
+      toast('Trip summary copied to clipboard!', 'success');
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
