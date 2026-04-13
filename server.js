@@ -442,7 +442,6 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
     if (!latest || expenseDate > latest) return expenseDate;
     return latest;
   }, null) || today;
-
   const systemPrompt =
     `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
     `Trip context:\n` +
