@@ -291,6 +291,37 @@ main#main-content {
 
 /* ---- Pie chart -------------------------------------------- */
 .chart-section { margin-bottom: 2rem; }
+.chart-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .75rem;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.chart-section-header .section-title { margin-bottom: 0; }
+.chart-toggles {
+  display: flex;
+  gap: .25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .2rem;
+}
+.chart-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: .35rem .85rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+.chart-toggle:hover { color: var(--text); }
+.chart-toggle.active { background: var(--surface); color: var(--yellow-dark); box-shadow: var(--shadow); }
 .chart-container {
   display: flex;
   align-items: center;

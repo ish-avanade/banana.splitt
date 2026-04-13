@@ -217,17 +217,19 @@ describe('Trips API', () => {
     describe('Expenses', () => {
       let expenseId;
 
-      it('POST /api/trips/:id/expenses adds an expense', async () => {
+      it('POST /api/trips/:id/expenses adds an expense with category', async () => {
         const { status, body } = await req('POST', `/api/trips/${tripId}/expenses`, {
           description: 'Hotel',
           amount: 200,
           paidBy: aliceId,
           splitBetween: [aliceId, bobId],
           date: '2024-07-01',
+          category: 'Accommodation',
         });
         assert.equal(status, 201);
         assert.equal(body.description, 'Hotel');
         assert.equal(body.amount, 200);
+        assert.equal(body.category, 'Accommodation');
         expenseId = body.id;
       });
 
@@ -254,15 +256,16 @@ describe('Trips API', () => {
         assert.equal(body.settlements[0].amount, 100);
       });
 
-      it('PUT /api/trips/:id/expenses/:eid updates an expense', async () => {
+      it('PUT /api/trips/:id/expenses/:eid updates an expense including category', async () => {
         const { status, body } = await req(
           'PUT',
           `/api/trips/${tripId}/expenses/${expenseId}`,
-          { description: 'Hotel & Breakfast', amount: 250 }
+          { description: 'Hotel & Breakfast', amount: 250, category: 'Food & Drink' }
         );
         assert.equal(status, 200);
         assert.equal(body.description, 'Hotel & Breakfast');
         assert.equal(body.amount, 250);
+        assert.equal(body.category, 'Food & Drink');
       });
 
       it('DELETE /api/trips/:id/expenses/:eid deletes an expense', async () => {
