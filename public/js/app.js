@@ -645,6 +645,7 @@ function expenseModalHTML(trip, expense) {
             </label>
           `).join('')}
         </div>
+        <div id="split-hint" class="split-hint hidden"></div>
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -668,6 +669,18 @@ function showEditExpenseModal(trip, expense, onSuccess) {
   attachExpenseFormHandlers(trip, expense, onSuccess);
 }
 
+const SPLIT_HINT_KEYWORDS = [
+  { pattern: /hotel|airbnb|accommodation|hostel|motel|resort/i, hint: 'This looks like accommodation — consider splitting between specific people only?' },
+  { pattern: /taxi|uber|lyft|cab|shuttle|rideshare/i,           hint: 'This looks like transport — consider splitting between specific people only?' },
+  { pattern: /flight|airline|airfare|plane|train|bus ticket/i,  hint: 'This looks like travel — consider splitting between specific people only?' },
+  { pattern: /room|suite|apartment|rental/i,                    hint: 'This looks like lodging — consider splitting between specific people only?' },
+];
+
+function getSplitHint(description) {
+  const match = SPLIT_HINT_KEYWORDS.find(({ pattern }) => pattern.test(description));
+  return match ? match.hint : null;
+}
+
 function attachExpenseFormHandlers(trip, expense, onSuccess) {
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   document.getElementById('split-all-btn').addEventListener('click', () => {
@@ -675,6 +688,22 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       cb.checked = true;
     });
   });
+
+  const descInput = document.getElementById('exp-desc');
+  const hintEl    = document.getElementById('split-hint');
+  function updateHint() {
+    const hint = getSplitHint(descInput.value);
+    if (hint) {
+      hintEl.textContent = '💡 ' + hint;
+      hintEl.classList.remove('hidden');
+    } else {
+      hintEl.textContent = '';
+      hintEl.classList.add('hidden');
+    }
+  }
+  descInput.addEventListener('input', updateHint);
+  // Show hint immediately if editing an existing expense with a matching description
+  updateHint();
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const description = document.getElementById('exp-desc').value.trim();
