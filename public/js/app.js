@@ -1010,19 +1010,41 @@ function renderAiExpenseCard(trip, parsed, tripId) {
       toast('Could not match all participant names — use Edit to fill in manually.', 'error');
       return;
     }
+    const btn = card.querySelector('.ai-add-btn');
+    btn.disabled = true;
+    btn.textContent = '…';
     try {
+      let amount = parsed.amount;
+      const extraFields = {};
+
+      if (currencyMismatch) {
+        const date = parsed.date || new Date().toISOString().split('T')[0];
+        const url = `https://api.frankfurter.dev/v1/${date}?from=${parsed.currency}&to=${trip.currency}&amount=${parsed.amount}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Could not fetch currency conversion');
+        const data = await res.json();
+        const convertedAmount = Math.round(data.rates[trip.currency] * 100) / 100;
+        amount = convertedAmount;
+        extraFields.originalCurrency = parsed.currency;
+        extraFields.originalAmount   = parsed.amount;
+        extraFields.convertedAmount  = convertedAmount;
+      }
+
       await post(`/trips/${tripId}/expenses`, {
         description:   parsed.description,
-        amount:        parsed.amount,
+        amount,
         paidBy:        parsed.paidBy,
         splitBetween:  parsed.splitBetween,
         date:          parsed.date,
+        ...extraFields,
       });
       toast('Expense added 💸', 'success');
       card.remove();
       renderTripDetail(tripId);
     } catch (err) {
-      toast(err.message, 'error');
+      toast(err.message || 'Could not add expense', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Add';
     }
   });
 
