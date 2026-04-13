@@ -982,8 +982,10 @@ function renderAiExpenseCard(trip, parsed, tripId) {
 
   const payerName      = parsed.paidByName || '?';
   const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
-  const displayCurrency = parsed.currency || trip.currency;
-  const currencyMismatch = parsed.currency && parsed.currency !== trip.currency;
+  // Validate parsed currency (must be a 3-letter ISO code present in the known list); fall back to trip currency
+  const parsedCurrency = (parsed.currency && /^[A-Z]{3}$/.test(parsed.currency)) ? parsed.currency : null;
+  const displayCurrency = parsedCurrency || trip.currency;
+  const currencyMismatch = parsedCurrency && parsedCurrency !== trip.currency;
 
   card.innerHTML = `
     <div class="ai-expense-card-body">
@@ -1024,8 +1026,11 @@ function renderAiExpenseCard(trip, parsed, tripId) {
     }
   });
 
-  card.querySelector('.ai-edit-btn').addEventListener('click', () => {
-    showAddExpenseModal(trip, () => {
+  card.querySelector('.ai-edit-btn').addEventListener('click', async () => {
+    // Re-fetch the trip so the edit modal sees any participants that were auto-created during parsing
+    let latestTrip = trip;
+    try { latestTrip = await get(`/trips/${tripId}`); } catch { /* fall back to current trip */ }
+    showAddExpenseModal(latestTrip, () => {
       card.remove();
       renderTripDetail(tripId);
     }, parsed);

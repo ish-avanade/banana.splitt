@@ -429,7 +429,7 @@ describe('AI parse-expense', () => {
     }
   });
 
-  it('parse-expense flags currency mismatch (USD on EUR trip)', async () => {
+  it('parse-expense passes through foreign currency code (USD on EUR trip)', async () => {
     process.env.MOCK_AI_RESPONSE = JSON.stringify([{
       description: 'dinner', amount: 50, paidBy: 'Alice',
       splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'USD',
@@ -515,6 +515,45 @@ describe('AI parse-expense', () => {
       // All known participants should be in the split
       assert.ok(body.expenses[0].splitBetween.includes(aliceId));
       assert.ok(body.expenses[0].splitBetween.includes(bobId));
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense defaults splitBetween to all participants when AI omits it', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'hotel', amount: 100, paidBy: 'Alice',
+      // splitBetween intentionally omitted — server should default to all participants
+      date: '2024-03-01', currency: 'EUR',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 100 for hotel',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // Should default to all trip participants
+      assert.ok(body.expenses[0].splitBetween.includes(aliceId));
+      assert.ok(body.expenses[0].splitBetween.includes(bobId));
+      assert.ok(body.expenses[0].splitBetween.length >= 2);
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense normalises invalid currency code to trip currency', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'snack', amount: 5, paidBy: 'Alice',
+      splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'euros',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 5 euros for snack',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // 'euros' is not a valid ISO code — should fall back to trip currency 'EUR'
+      assert.equal(body.expenses[0].currency, 'EUR');
     } finally {
       delete process.env.MOCK_AI_RESPONSE;
     }

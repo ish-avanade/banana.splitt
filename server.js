@@ -407,7 +407,7 @@ function buildAiRequest(systemPrompt, userMessage) {
 
 // Report whether the AI feature is available
 app.get('/api/ai-enabled', (req, res) => {
-  res.json({ enabled: isAiConfigured() });
+  res.json({ enabled: isAiConfigured() || !!process.env.MOCK_AI_RESPONSE });
 });
 
 // Parse a natural-language message into structured expense(s)
@@ -429,24 +429,31 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
   }
 
   const today = new Date().toISOString().split('T')[0];
-  const participantNames = trip.participants.map((p) => p.name).join(', ') || 'none';
+  // Build participant name list used in the prompt (may be empty on a brand-new trip)
+  const participantNames = trip.participants.map((p) => p.name).join(', ');
 
-  // Default date: most recent expense date, or today if no expenses yet
-  const lastExpenseDate = trip.expenses?.length
-    ? [...trip.expenses].sort((a, b) => b.date.localeCompare(a.date))[0].date
-    : today;
+  // Default date: most recent valid expense date, or today if none exist
+  const lastExpenseDate = (trip.expenses || []).reduce((latest, expense) => {
+    const expenseDate =
+      typeof expense?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expense.date)
+        ? expense.date
+        : null;
+    if (!expenseDate) return latest;
+    if (!latest || expenseDate > latest) return expenseDate;
+    return latest;
+  }, null) || today;
 
   const systemPrompt =
     `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
     `Trip context:\n` +
-    `- Participants: ${participantNames}\n` +
+    `- Participants: ${participantNames || 'none yet'}\n` +
     `- Trip currency: ${trip.currency}\n` +
     `- Default date (if not specified): ${lastExpenseDate}\n\n` +
     `Return ONLY a JSON array of expense objects. Each object must have:\n` +
     `- description: string (what was bought/paid for)\n` +
     `- amount: number (positive, no currency symbols)\n` +
     `- paidBy: string (name of who paid — may be a new person not in the participants list)\n` +
-    `- splitBetween: array of strings (participant names sharing this expense; if not specified use ALL participants: ${participantNames})\n` +
+    `- splitBetween: array of strings (participant names sharing this expense${participantNames ? `; if not specified use ALL participants: ${participantNames}` : ''})\n` +
     `- date: string (YYYY-MM-DD; use the default date above if not specified)\n` +
     `- currency: string (ISO currency code — interpret written names: "euros"→EUR, "dollars"→USD, "pounds"→GBP, "yen"→JPY, "rupees"→INR; default to ${trip.currency} if not mentioned)\n\n` +
     `Rules:\n` +
@@ -513,9 +520,13 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
 
     const expenses = parsed.map((item) => {
       const payer = findOrCreateParticipant(item.paidBy);
-      const splitParticipants = Array.isArray(item.splitBetween)
+      // Default to ALL current participants (including any newly created payer) when omitted
+      const splitParticipants = (Array.isArray(item.splitBetween) && item.splitBetween.length > 0)
         ? item.splitBetween.map(findOrCreateParticipant).filter(Boolean)
-        : [];
+        : trip.participants.slice();
+      // Normalize and validate currency; fall back to trip currency if invalid
+      const rawCurrency = (item.currency || '').trim().toUpperCase();
+      const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : trip.currency;
       return {
         description: String(item.description || '').trim(),
         amount: Number(item.amount) || 0,
@@ -524,7 +535,7 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
         splitBetween: splitParticipants.map((p) => p.id),
         splitBetweenNames: splitParticipants.map((p) => p.name),
         date: item.date || lastExpenseDate,
-        currency: item.currency || trip.currency,
+        currency,
       };
     });
 
