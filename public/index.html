@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>banana.splitt 🍌</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <!-- ======================================================================
+       APP SHELL
+  ====================================================================== -->
+  <div id="app">
+
+    <!-- ── Header ──────────────────────────────────────────────────────── -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="logo" id="logo-home">
+          <span class="logo-icon">🍌</span>
+          <span class="logo-text">banana<span class="logo-dot">.</span>splitt</span>
+        </div>
+        <nav class="breadcrumb" id="breadcrumb" aria-label="breadcrumb"></nav>
+      </div>
+    </header>
+
+    <!-- ── Main content ────────────────────────────────────────────────── -->
+    <main id="main-content"></main>
+
+  </div>
+
+  <!-- ======================================================================
+       MODAL OVERLAY
+  ====================================================================== -->
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-box" id="modal-box">
+      <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       TOAST
+  ====================================================================== -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- ======================================================================
+       TEMPLATES
+  ====================================================================== -->
+
+  <!-- Home / Trip list -->
+  <template id="tpl-home">
+    <section class="page home-page">
+      <div class="page-header">
+        <h1>Your Trips</h1>
+        <button class="btn btn-primary" id="btn-new-trip">
+          <span class="btn-icon">+</span> New Trip
+        </button>
+      </div>
+      <div id="trips-grid" class="trips-grid"></div>
+      <div id="trips-empty" class="empty-state hidden">
+        <div class="empty-icon">✈️</div>
+        <h2>No trips yet</h2>
+        <p>Create your first trip to start splitting costs with friends.</p>
+        <button class="btn btn-primary" id="btn-new-trip-empty">+ New Trip</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- Trip card (stamped for each trip in list) -->
+  <template id="tpl-trip-card">
+    <div class="trip-card" data-trip-id="">
+      <div class="trip-card-header">
+        <div class="trip-card-emoji">🌍</div>
+        <div class="trip-card-info">
+          <h3 class="trip-card-name"></h3>
+          <p class="trip-card-desc"></p>
+        </div>
+      </div>
+      <div class="trip-card-stats">
+        <div class="stat">
+          <span class="stat-value members-count">0</span>
+          <span class="stat-label">members</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value expenses-count">0</span>
+          <span class="stat-label">expenses</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value total-amount">0.00</span>
+          <span class="stat-label total-label">total</span>
+        </div>
+      </div>
+      <div class="trip-card-actions">
+        <button class="btn btn-primary btn-sm open-trip-btn">Open</button>
+        <button class="btn btn-ghost btn-sm delete-trip-btn" aria-label="Delete trip">🗑️</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Trip detail page -->
+  <template id="tpl-trip-detail">
+    <section class="page trip-detail-page">
+      <div class="page-header">
+        <div>
+          <h1 class="trip-title"></h1>
+          <p class="trip-subtitle"></p>
+        </div>
+        <button class="btn btn-primary" id="btn-add-expense">
+          <span class="btn-icon">+</span> Add Expense
+        </button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="expenses" role="tab" aria-selected="true">
+          💸 Expenses
+        </button>
+        <button class="tab" data-tab="balances" role="tab" aria-selected="false">
+          ⚖️ Balances
+        </button>
+        <button class="tab" data-tab="members" role="tab" aria-selected="false">
+          👥 Members
+        </button>
+      </div>
+
+      <!-- Tab panels -->
+      <div id="tab-expenses" class="tab-panel">
+        <div id="expenses-list" class="expenses-list"></div>
+        <div id="expenses-empty" class="empty-state hidden">
+          <div class="empty-icon">💸</div>
+          <h2>No expenses yet</h2>
+          <p>Add your first expense to start tracking costs.</p>
+        </div>
+      </div>
+
+      <div id="tab-balances" class="tab-panel hidden">
+        <div class="balances-section">
+          <h2 class="section-title">Who owes what</h2>
+          <div id="balances-list" class="balances-list"></div>
+        </div>
+        <div class="settlements-section">
+          <h2 class="section-title">Suggested settlements</h2>
+          <div id="settlements-list" class="settlements-list"></div>
+          <div id="settlements-empty" class="empty-state hidden">
+            <div class="empty-icon">🎉</div>
+            <h2>All settled up!</h2>
+            <p>No payments needed.</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-members" class="tab-panel hidden">
+        <div class="members-toolbar">
+          <button class="btn btn-primary btn-sm" id="btn-add-member">
+            <span class="btn-icon">+</span> Add Member
+          </button>
+        </div>
+        <div id="members-list" class="members-list"></div>
+        <div id="members-empty" class="empty-state hidden">
+          <div class="empty-icon">👥</div>
+          <h2>No members yet</h2>
+          <p>Add members to start splitting costs.</p>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "banana.splitt",
+  "version": "1.0.0",
+  "description": "Cost splitting app",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test tests/api.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ish-avanade/banana.splitt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ish-avanade/banana.splitt/issues"
+  },
+  "homepage": "https://github.com/ish-avanade/banana.splitt#readme",
+  "dependencies": {
+    "express": "^5.2.1",
+    "uuid": "^13.0.0"
+  }
+}
