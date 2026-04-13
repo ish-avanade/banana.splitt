@@ -1019,18 +1019,18 @@ function renderAiExpenseCard(trip, parsed, tripId) {
 
       if (currencyMismatch) {
         const date = parsed.date || new Date().toISOString().split('T')[0];
-        const url = `https://api.frankfurter.dev/v1/${date}?from=${parsed.currency}&to=${trip.currency}&amount=${parsed.amount}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Could not fetch currency conversion');
-        const data = await res.json();
-        const url = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
-        url.searchParams.set('from', parsedCurrency);
-        url.searchParams.set('to', trip.currency);
-        url.searchParams.set('amount', String(parsed.amount));
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Could not fetch currency conversion');
-        const data = await res.json();
-        const convertedAmount = Math.round(data.rates[trip.currency] * 100) / 100;
+        const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
+        convUrl.searchParams.set('from', parsedCurrency);
+        convUrl.searchParams.set('to', trip.currency);
+        convUrl.searchParams.set('amount', String(parsed.amount));
+        const convRes = await fetch(convUrl);
+        if (!convRes.ok) throw new Error('Could not fetch currency conversion');
+        const convData = await convRes.json();
+        const converted = convData.rates?.[trip.currency];
+        if (typeof converted !== 'number' || !Number.isFinite(converted)) {
+          throw new Error(`Could not convert ${parsedCurrency} to ${trip.currency}`);
+        }
+        const convertedAmount = Math.round(converted * 100) / 100;
         amount = convertedAmount;
         extraFields.originalCurrency = parsedCurrency;
         extraFields.originalAmount   = parsed.amount;
