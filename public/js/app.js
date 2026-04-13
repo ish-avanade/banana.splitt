@@ -980,8 +980,12 @@ function renderAiExpenseCard(trip, parsed, tripId) {
   const card = document.createElement('div');
   card.className = 'ai-expense-card';
 
-  const payerName  = parsed.paidByName || '?';
-  const splitNames = parsed.splitBetweenNames?.join(', ') || '?';
+  const payerName      = parsed.paidByName || '?';
+  const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
+  // Validate parsed currency (must be a 3-letter ISO code present in the known list); fall back to trip currency
+  const parsedCurrency = (parsed.currency && /^[A-Z]{3}$/.test(parsed.currency)) ? parsed.currency : null;
+  const displayCurrency = parsedCurrency || trip.currency;
+  const currencyMismatch = parsedCurrency && parsedCurrency !== trip.currency;
 
   card.innerHTML = `
     <div class="ai-expense-card-body">
@@ -990,9 +994,10 @@ function renderAiExpenseCard(trip, parsed, tripId) {
         Paid by <strong>${escHtml(payerName)}</strong>
         · Split: ${escHtml(splitNames)}
         · <time>${escHtml(parsed.date || '')}</time>
+        ${currencyMismatch ? `· <span class="ai-currency-warning">⚠ Currency: ${escHtml(parsed.currency)} (trip uses ${escHtml(trip.currency)})</span>` : ''}
       </div>
     </div>
-    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, trip.currency)}</div>
+    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, displayCurrency)}</div>
     <div class="ai-expense-card-actions">
       <button class="btn btn-primary btn-sm ai-add-btn">Add</button>
       <button class="btn btn-secondary btn-sm ai-edit-btn">Edit</button>
@@ -1021,8 +1026,11 @@ function renderAiExpenseCard(trip, parsed, tripId) {
     }
   });
 
-  card.querySelector('.ai-edit-btn').addEventListener('click', () => {
-    showAddExpenseModal(trip, () => {
+  card.querySelector('.ai-edit-btn').addEventListener('click', async () => {
+    // Re-fetch the trip so the edit modal sees any participants that were auto-created during parsing
+    let latestTrip = trip;
+    try { latestTrip = await get(`/trips/${tripId}`); } catch { /* fall back to current trip */ }
+    showAddExpenseModal(latestTrip, () => {
       card.remove();
       renderTripDetail(tripId);
     }, parsed);

@@ -408,4 +408,154 @@ describe('AI parse-expense', () => {
     assert.equal(status, 400);
     assert.ok(body.error);
   });
+
+  // --- New behavior tests using MOCK_AI_RESPONSE ---
+
+  it('parse-expense passes through currency field from AI response', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'food', amount: 20, paidBy: 'Alice',
+      splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'EUR',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 20 euros for food',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      assert.equal(body.expenses[0].currency, 'EUR');
+      assert.equal(body.expenses[0].amount, 20);
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense passes through foreign currency code (USD on EUR trip)', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'dinner', amount: 50, paidBy: 'Alice',
+      splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'USD',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 50 dollars for dinner',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      assert.equal(body.expenses[0].currency, 'USD');
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense uses last expense date when AI returns no date', async () => {
+    // Add an expense with a known date
+    const { body: expense } = await req('POST', `/api/trips/${tripId}/expenses`, {
+      description: 'taxi', amount: 10, paidBy: aliceId,
+      splitBetween: [aliceId, bobId], date: '2024-06-15',
+    });
+
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'coffee', amount: 5, paidBy: 'Alice',
+      splitBetween: ['Alice', 'Bob'],
+      // no date field — server should default to last expense date
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 5 for coffee',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      assert.equal(body.expenses[0].date, '2024-06-15');
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+      // Clean up the expense
+      await req('DELETE', `/api/trips/${tripId}/expenses/${expense.id}`);
+    }
+  });
+
+  it('parse-expense auto-creates unknown participant and persists them', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'food', amount: 20, paidBy: 'Ish',
+      splitBetween: ['Alice', 'Bob', 'Ish'], date: '2024-03-01', currency: 'EUR',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Ish paid 20 for food',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // paidBy should be a valid ID (not null)
+      assert.ok(body.expenses[0].paidBy, 'paidBy should be set');
+      assert.equal(body.expenses[0].paidByName, 'Ish');
+      // splitBetween should include all three
+      assert.equal(body.expenses[0].splitBetween.length, 3);
+
+      // Verify the new participant persists in the trip
+      const { body: trip } = await req('GET', `/api/trips/${tripId}`);
+      assert.ok(trip.participants.some((p) => p.name === 'Ish'), 'Ish should be persisted as a participant');
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+      // Remove the auto-created participant to keep state clean for other tests
+      const { body: trip } = await req('GET', `/api/trips/${tripId}`);
+      const ish = trip.participants.find((p) => p.name === 'Ish');
+      if (ish) await req('DELETE', `/api/trips/${tripId}/participants/${ish.id}`);
+    }
+  });
+
+  it('parse-expense returns all participants in splitBetween when AI does so', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'taxi', amount: 15, paidBy: 'Bob',
+      splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'EUR',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Bob paid 15 for taxi',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // All known participants should be in the split
+      assert.ok(body.expenses[0].splitBetween.includes(aliceId));
+      assert.ok(body.expenses[0].splitBetween.includes(bobId));
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense defaults splitBetween to all participants when AI omits it', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'hotel', amount: 100, paidBy: 'Alice',
+      // splitBetween intentionally omitted — server should default to all participants
+      date: '2024-03-01', currency: 'EUR',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 100 for hotel',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // Should default to all trip participants
+      assert.ok(body.expenses[0].splitBetween.includes(aliceId));
+      assert.ok(body.expenses[0].splitBetween.includes(bobId));
+      assert.ok(body.expenses[0].splitBetween.length >= 2);
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+
+  it('parse-expense normalises invalid currency code to trip currency', async () => {
+    process.env.MOCK_AI_RESPONSE = JSON.stringify([{
+      description: 'snack', amount: 5, paidBy: 'Alice',
+      splitBetween: ['Alice', 'Bob'], date: '2024-03-01', currency: 'euros',
+    }]);
+    try {
+      const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+        message: 'Alice paid 5 euros for snack',
+      });
+      assert.equal(status, 200);
+      assert.equal(body.expenses.length, 1);
+      // 'euros' is not a valid ISO code — should fall back to trip currency 'EUR'
+      assert.equal(body.expenses[0].currency, 'EUR');
+    } finally {
+      delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
 });
