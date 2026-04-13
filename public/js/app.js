@@ -1,5 +1,5 @@
 /* ============================================================
-   banana.splitt — frontend application
+   banana/splitt — frontend application
    ============================================================ */
 'use strict';
 
@@ -301,8 +301,14 @@ async function renderTripDetail(tripId) {
       showAddMemberModal(trip, () => renderTripDetail(tripId))
     );
 
+    // Share balances button
+    main.querySelector('#btn-share-balances').addEventListener('click', () =>
+      shareBalancesSummary(tripId, trip)
+    );
+
     renderExpensesTab(trip, tripId);
     renderMembersTab(trip, tripId);
+    renderDashboard(trip);
     await renderBalancesTab(tripId, trip.currency);
   } catch (err) {
     toast(err.message, 'error');
@@ -370,6 +376,107 @@ function renderExpensesTab(trip, tripId) {
   }
 }
 
+// ---- Dashboard + Pie chart ----
+
+const PIE_COLORS = [
+  '#FBBF24', '#3B82F6', '#10B981', '#EF4444', '#8B5CF6',
+  '#F97316', '#EC4899', '#14B8A6', '#6366F1', '#F59E0B',
+  '#06B6D4', '#84CC16', '#E11D48', '#A855F7', '#22D3EE',
+];
+
+function renderDashboard(trip) {
+  const total = trip.expenses.reduce((s, e) => s + e.amount, 0);
+  const memberCount = trip.participants.length;
+  document.getElementById('dash-total').textContent = fmt(total, trip.currency);
+  document.getElementById('dash-expense-count').textContent = trip.expenses.length;
+  document.getElementById('dash-member-count').textContent = memberCount;
+  document.getElementById('dash-avg').textContent =
+    memberCount > 0 ? fmt(total / memberCount, trip.currency) : fmt(0, trip.currency);
+
+  // Spending per member (who paid)
+  const spentByPayer = {};
+  for (const p of trip.participants) spentByPayer[p.id] = { name: p.name, amount: 0 };
+  for (const e of trip.expenses) {
+    if (spentByPayer[e.paidBy]) spentByPayer[e.paidBy].amount += e.amount;
+  }
+
+  const slices = Object.values(spentByPayer)
+    .filter((s) => s.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  const chartSection = document.getElementById('chart-section');
+  if (slices.length === 0) {
+    chartSection.classList.add('hidden');
+    return;
+  }
+  chartSection.classList.remove('hidden');
+
+  drawPieChart(document.getElementById('pie-chart'), slices, trip.currency);
+  renderChartLegend(document.getElementById('chart-legend'), slices, total, trip.currency);
+}
+
+function drawPieChart(canvas, slices, currency) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const size = 260;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.scale(dpr, dpr);
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = 110;
+  const innerRadius = 60;
+  const total = slices.reduce((s, sl) => s + sl.amount, 0);
+
+  let startAngle = -Math.PI / 2;
+  slices.forEach((slice, i) => {
+    const sliceAngle = (slice.amount / total) * Math.PI * 2;
+    const endAngle = startAngle + sliceAngle;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, endAngle);
+    ctx.arc(cx, cy, innerRadius, endAngle, startAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+    ctx.fill();
+
+    // Subtle separator
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    startAngle = endAngle;
+  });
+
+  // Center label
+  ctx.fillStyle = '#111827';
+  ctx.font = '700 14px -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Total', cx, cy - 10);
+  ctx.font = '800 16px -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.fillText(fmt(total, currency), cx, cy + 12);
+}
+
+function renderChartLegend(container, slices, total, currency) {
+  container.innerHTML = '';
+  slices.forEach((slice, i) => {
+    const pct = ((slice.amount / total) * 100).toFixed(1);
+    const div = document.createElement('div');
+    div.className = 'legend-item';
+    div.innerHTML = `
+      <span class="legend-dot" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>
+      <span class="legend-name">${escHtml(slice.name)}</span>
+      <span class="legend-value">${fmt(slice.amount, currency)}</span>
+      <span class="legend-pct">${pct}%</span>
+    `;
+    container.appendChild(div);
+  });
+}
+
 // ---- Balances tab ----
 
 async function renderBalancesTab(tripId, currency) {
@@ -417,6 +524,46 @@ async function renderBalancesTab(tripId, currency) {
     }
   } catch (err) {
     toast(err.message, 'error');
+  }
+}
+
+// ---- Share balances ----
+
+async function shareBalancesSummary(tripId, trip) {
+  try {
+    const { balances, settlements } = await get(`/trips/${tripId}/balances`);
+    let text = `🍌 ${trip.name} — Balance Summary\n`;
+    text += '━'.repeat(30) + '\n\n';
+
+    text += '⚖️ Balances:\n';
+    for (const b of balances) {
+      const sign = b.balance > 0.005 ? '+' : '';
+      text += `  ${b.name}: ${sign}${fmt(Math.abs(b.balance), trip.currency)}`;
+      if (b.balance > 0.005) text += ' (gets back)';
+      else if (b.balance < -0.005) text += ' (owes)';
+      else text += ' (settled)';
+      text += '\n';
+    }
+
+    if (settlements.length > 0) {
+      text += '\n💸 Payments needed:\n';
+      for (const s of settlements) {
+        text += `  ${s.fromName} → pays ${fmt(s.amount, trip.currency)} → ${s.toName}\n`;
+      }
+    } else {
+      text += '\n🎉 All settled up!\n';
+    }
+
+    if (navigator.share) {
+      await navigator.share({ title: `${trip.name} — Balances`, text });
+    } else {
+      await navigator.clipboard.writeText(text);
+      toast('Summary copied to clipboard!', 'success');
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      toast(err.message, 'error');
+    }
   }
 }
 

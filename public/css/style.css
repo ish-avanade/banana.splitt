@@ -1,5 +1,5 @@
 /* ============================================================
-   banana.splitt — stylesheet
+   banana/splitt — stylesheet
    ============================================================ */
 
 /* ---- Reset / base ----------------------------------------- */
@@ -255,8 +255,82 @@ main#main-content {
 .expense-amount { font-size: 1.15rem; font-weight: 800; text-align: right; min-width: 70px; }
 .expense-actions { display: flex; gap: .25rem; }
 
+/* ---- Dashboard cards -------------------------------------- */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .75rem;
+  margin-bottom: 2rem;
+}
+@media (max-width: 600px) {
+  .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.dash-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+.dash-card-label {
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: .3rem;
+}
+.dash-card-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text);
+}
+.dash-total .dash-card-value { color: var(--yellow-dark); }
+.dash-avg .dash-card-value { color: var(--blue); }
+
+/* ---- Pie chart -------------------------------------------- */
+.chart-section { margin-bottom: 2rem; }
+.chart-container {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+@media (max-width: 600px) {
+  .chart-container { flex-direction: column; }
+}
+#pie-chart { flex-shrink: 0; }
+.chart-legend { flex: 1; display: flex; flex-direction: column; gap: .5rem; }
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .88rem;
+}
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.legend-name { flex: 1; font-weight: 600; }
+.legend-value { font-weight: 700; min-width: 70px; text-align: right; }
+.legend-pct {
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  min-width: 42px;
+  text-align: right;
+}
+
 /* ---- Balances --------------------------------------------- */
 .balances-section, .settlements-section { margin-bottom: 2rem; }
+.share-section { margin-top: 1.5rem; text-align: center; }
 .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
 .balances-list { display: flex; flex-direction: column; gap: .6rem; }
 .balance-item {
