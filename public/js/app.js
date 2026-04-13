@@ -1023,7 +1023,11 @@ function renderAiExpenseCard(trip, parsed, tripId) {
         const res = await fetch(url);
         if (!res.ok) throw new Error('Could not fetch currency conversion');
         const data = await res.json();
-        const convertedAmount = Math.round(data.rates[trip.currency] * 100) / 100;
+        const rate = data.rates?.[trip.currency];
+        if (!Number.isFinite(rate)) {
+          throw new Error('Could not convert currency because the exchange rate is unavailable');
+        }
+        const convertedAmount = Math.round(rate * 100) / 100;
         amount = convertedAmount;
         extraFields.originalCurrency = parsed.currency;
         extraFields.originalAmount   = parsed.amount;
