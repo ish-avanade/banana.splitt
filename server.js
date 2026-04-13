@@ -347,7 +347,7 @@ app.get('/{*path}', (req, res) => {
 // ---------------------------------------------------------------------------
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`🍌 banana.splitt is running at http://localhost:${PORT}`);
+    console.log(`🍌 banana/splitt is running at http://localhost:${PORT}`);
   });
 }
 

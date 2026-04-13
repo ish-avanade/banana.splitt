@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>banana.splitt 🍌</title>
+  <title>banana/splitt 🍌</title>
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
@@ -18,7 +18,7 @@
       <div class="header-inner">
         <div class="logo" id="logo-home">
           <span class="logo-icon">🍌</span>
-          <span class="logo-text">banana<span class="logo-dot">.</span>splitt</span>
+          <span class="logo-text">banana<span class="logo-dot">/</span>splitt</span>
         </div>
         <nav class="breadcrumb" id="breadcrumb" aria-label="breadcrumb"></nav>
       </div>
@@ -135,6 +135,35 @@
       </div>
 
       <div id="tab-balances" class="tab-panel hidden">
+        <!-- Dashboard overview -->
+        <div class="dashboard-grid" id="dashboard-grid">
+          <div class="dash-card dash-total">
+            <div class="dash-card-label">Total Spent</div>
+            <div class="dash-card-value" id="dash-total">$0</div>
+          </div>
+          <div class="dash-card dash-expenses-count">
+            <div class="dash-card-label">Expenses</div>
+            <div class="dash-card-value" id="dash-expense-count">0</div>
+          </div>
+          <div class="dash-card dash-members-count">
+            <div class="dash-card-label">Members</div>
+            <div class="dash-card-value" id="dash-member-count">0</div>
+          </div>
+          <div class="dash-card dash-avg">
+            <div class="dash-card-label">Per Person</div>
+            <div class="dash-card-value" id="dash-avg">$0</div>
+          </div>
+        </div>
+
+        <!-- Spending pie chart -->
+        <div class="chart-section" id="chart-section">
+          <h2 class="section-title">Spending Breakdown</h2>
+          <div class="chart-container">
+            <canvas id="pie-chart" width="260" height="260"></canvas>
+            <div class="chart-legend" id="chart-legend"></div>
+          </div>
+        </div>
+
         <div class="balances-section">
           <h2 class="section-title">Who owes what</h2>
           <div id="balances-list" class="balances-list"></div>
@@ -147,6 +176,11 @@
             <h2>All settled up!</h2>
             <p>No payments needed.</p>
           </div>
+        </div>
+        <div class="share-section">
+          <button class="btn btn-primary" id="btn-share-balances">
+            📤 Share Summary
+          </button>
         </div>
       </div>
 
