@@ -336,6 +336,118 @@ app.get('/api/trips/:id/balances', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// API Routes — AI Parse Expense
+// ---------------------------------------------------------------------------
+
+// Report whether the AI feature is available
+app.get('/api/ai-enabled', (req, res) => {
+  res.json({ enabled: !!process.env.OPENAI_API_KEY });
+});
+
+// Parse a natural-language message into structured expense(s)
+app.post('/api/trips/:id/parse-expense', async (req, res) => {
+  const data = loadData();
+  const trip = data.trips.find((t) => t.id === req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+  const { message } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'AI parsing is not configured (no OPENAI_API_KEY set)' });
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const participantNames = trip.participants.map((p) => p.name).join(', ') || 'none';
+
+  const systemPrompt =
+    `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
+    `Trip context:\n` +
+    `- Participants: ${participantNames}\n` +
+    `- Currency: ${trip.currency}\n` +
+    `- Today's date: ${today}\n\n` +
+    `Return ONLY a JSON array of expense objects. Each object must have:\n` +
+    `- description: string (what was bought/paid for)\n` +
+    `- amount: number (positive, no currency symbols)\n` +
+    `- paidBy: string (name of who paid, must match one of the participants)\n` +
+    `- splitBetween: array of strings (participant names sharing this expense)\n` +
+    `- date: string (YYYY-MM-DD, use today if not specified)\n\n` +
+    `If you cannot confidently parse the expense return an empty array [].\n` +
+    `Return only the JSON array, no other text, no markdown fences.`;
+
+  try {
+    const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message.trim() },
+        ],
+        temperature: 0,
+      }),
+    });
+
+    if (!aiRes.ok) {
+      const errBody = await aiRes.json().catch(() => ({}));
+      return res.status(502).json({ error: errBody.error?.message || 'AI service error' });
+    }
+
+    const aiData = await aiRes.json();
+    const rawContent = aiData.choices?.[0]?.message?.content || '[]';
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      return res.status(422).json({ error: 'AI returned unparseable response', raw: rawContent });
+    }
+
+    if (!Array.isArray(parsed)) {
+      return res.status(422).json({ error: 'AI returned unexpected format' });
+    }
+
+    // Map participant names to IDs (case-insensitive fuzzy match)
+    function findParticipant(name) {
+      const lower = (name || '').toLowerCase().trim();
+      return (
+        trip.participants.find((p) => p.name.toLowerCase() === lower) ||
+        trip.participants.find((p) => p.name.toLowerCase().startsWith(lower)) ||
+        trip.participants.find((p) => lower.startsWith(p.name.toLowerCase())) ||
+        null
+      );
+    }
+
+    const expenses = parsed.map((item) => {
+      const payer = findParticipant(item.paidBy);
+      const splitParticipants = Array.isArray(item.splitBetween)
+        ? item.splitBetween.map(findParticipant).filter(Boolean)
+        : [];
+      return {
+        description: String(item.description || '').trim(),
+        amount: Number(item.amount) || 0,
+        paidBy: payer ? payer.id : null,
+        paidByName: payer ? payer.name : (item.paidBy || null),
+        splitBetween: splitParticipants.map((p) => p.id),
+        splitBetweenNames: splitParticipants.map((p) => p.name),
+        date: item.date || today,
+      };
+    });
+
+    res.json({ expenses });
+  } catch (err) {
+    console.error('AI parse-expense error:', err);
+    res.status(502).json({ error: 'Failed to reach AI service' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // SPA fallback – serve index.html for any non-API route
 // ---------------------------------------------------------------------------
 app.get('/{*path}', (req, res) => {
