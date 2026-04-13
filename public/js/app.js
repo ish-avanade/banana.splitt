@@ -310,6 +310,7 @@ async function renderTripDetail(tripId) {
     renderMembersTab(trip, tripId);
     renderDashboard(trip);
     await renderBalancesTab(tripId, trip.currency);
+    await initAiChat(trip, tripId);
   } catch (err) {
     toast(err.message, 'error');
     navigate('');
@@ -625,14 +626,17 @@ function renderMembersTab(trip, tripId) {
 // MODALS — Add / Edit Expense
 // ---------------------------------------------------------------------------
 
-function expenseModalHTML(trip, expense) {
+function expenseModalHTML(trip, expense, prefill = null) {
   const participants = trip.participants;
   const today = new Date().toISOString().split('T')[0];
 
-  const splitIds = expense?.splitBetween || participants.map((p) => p.id);
+  // `vals` provides default values: editing an existing expense takes priority,
+  // then AI-prefilled data, then blank.
+  const vals = expense || prefill;
+  const splitIds = vals?.splitBetween || participants.map((p) => p.id);
 
   // When editing, show original amount if a foreign currency was used
-  const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : '');
+  const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : (vals?.amount || ''));
   const expCurrency = expense?.originalCurrency || trip.currency;
 
   return `
@@ -641,7 +645,7 @@ function expenseModalHTML(trip, expense) {
       <div class="form-group">
         <label for="exp-desc">Description *</label>
         <input id="exp-desc" type="text" placeholder="e.g. Hotel, Dinner, Taxi…"
-          value="${escAttr(expense?.description || '')}" required maxlength="120" />
+          value="${escAttr(vals?.description || '')}" required maxlength="120" />
       </div>
       <div class="form-group">
         <label for="exp-amount">Amount *</label>
@@ -658,13 +662,13 @@ function expenseModalHTML(trip, expense) {
       </div>
       <div class="form-group">
         <label for="exp-date">Date</label>
-        <input id="exp-date" type="date" value="${expense?.date || today}" />
+        <input id="exp-date" type="date" value="${vals?.date || today}" />
       </div>
       <div class="form-group">
         <label for="exp-paidby">Paid by *</label>
         <select id="exp-paidby">
           ${participants.map((p) =>
-            `<option value="${p.id}" ${expense?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
+            `<option value="${p.id}" ${vals?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
           ).join('')}
         </select>
       </div>
@@ -690,12 +694,12 @@ function expenseModalHTML(trip, expense) {
   `;
 }
 
-function showAddExpenseModal(trip, onSuccess) {
+function showAddExpenseModal(trip, onSuccess, prefill = null) {
   if (trip.participants.length === 0) {
     toast('Add members to the trip before adding expenses.', 'error');
     return;
   }
-  openModal(expenseModalHTML(trip));
+  openModal(expenseModalHTML(trip, null, prefill));
   attachExpenseFormHandlers(trip, null, onSuccess);
 }
 
@@ -918,6 +922,115 @@ async function confirmRemoveMember(trip, participant, onSuccess) {
       toast(err.message, 'error');
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// AI CHAT — Natural language expense entry
+// ---------------------------------------------------------------------------
+
+async function initAiChat(trip, tripId) {
+  const chatBar = document.getElementById('ai-chat-bar');
+  if (!chatBar) return;
+
+  try {
+    const { enabled } = await get('/ai-enabled');
+    if (!enabled) return;
+  } catch {
+    return;
+  }
+
+  chatBar.classList.remove('hidden');
+
+  const form    = document.getElementById('ai-chat-form');
+  const input   = document.getElementById('ai-chat-input');
+  const results = document.getElementById('ai-parsed-results');
+  const sendBtn = form.querySelector('.ai-chat-send');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+    results.innerHTML = '';
+
+    try {
+      const { expenses } = await post(`/trips/${tripId}/parse-expense`, { message });
+
+      if (!expenses || expenses.length === 0) {
+        toast('Could not parse any expenses. Try being more specific or use the form.', 'error');
+        return;
+      }
+
+      input.value = '';
+      for (const expense of expenses) {
+        results.appendChild(renderAiExpenseCard(trip, expense, tripId));
+      }
+    } catch {
+      toast('Could not parse the message — try the form instead.', 'error');
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  });
+}
+
+function renderAiExpenseCard(trip, parsed, tripId) {
+  const card = document.createElement('div');
+  card.className = 'ai-expense-card';
+
+  const payerName  = parsed.paidByName || '?';
+  const splitNames = parsed.splitBetweenNames?.join(', ') || '?';
+
+  card.innerHTML = `
+    <div class="ai-expense-card-body">
+      <div class="ai-expense-card-desc">${escHtml(parsed.description || 'Untitled')}</div>
+      <div class="ai-expense-card-meta">
+        Paid by <strong>${escHtml(payerName)}</strong>
+        · Split: ${escHtml(splitNames)}
+        · <time>${escHtml(parsed.date || '')}</time>
+      </div>
+    </div>
+    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, trip.currency)}</div>
+    <div class="ai-expense-card-actions">
+      <button class="btn btn-primary btn-sm ai-add-btn">Add</button>
+      <button class="btn btn-secondary btn-sm ai-edit-btn">Edit</button>
+      <button class="btn btn-ghost btn-sm ai-dismiss-btn" aria-label="Dismiss">✕</button>
+    </div>
+  `;
+
+  card.querySelector('.ai-add-btn').addEventListener('click', async () => {
+    if (!parsed.paidBy || !parsed.splitBetween?.length) {
+      toast('Could not match all participant names — use Edit to fill in manually.', 'error');
+      return;
+    }
+    try {
+      await post(`/trips/${tripId}/expenses`, {
+        description:   parsed.description,
+        amount:        parsed.amount,
+        paidBy:        parsed.paidBy,
+        splitBetween:  parsed.splitBetween,
+        date:          parsed.date,
+      });
+      toast('Expense added 💸', 'success');
+      card.remove();
+      renderTripDetail(tripId);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  card.querySelector('.ai-edit-btn').addEventListener('click', () => {
+    showAddExpenseModal(trip, () => {
+      card.remove();
+      renderTripDetail(tripId);
+    }, parsed);
+  });
+
+  card.querySelector('.ai-dismiss-btn').addEventListener('click', () => card.remove());
+
+  return card;
 }
 
 // ---------------------------------------------------------------------------

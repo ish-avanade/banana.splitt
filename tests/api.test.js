@@ -351,3 +351,61 @@ describe('Trips API', () => {
     assert.equal(s2, 404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AI parse-expense endpoint
+// ---------------------------------------------------------------------------
+
+describe('AI parse-expense', () => {
+  let tripId, aliceId, bobId;
+
+  before(async () => {
+    const { body: trip } = await req('POST', '/api/trips', {
+      name: 'AI Test Trip', currency: 'EUR',
+    });
+    tripId = trip.id;
+    const { body: a } = await req('POST', `/api/trips/${tripId}/participants`, { name: 'Alice' });
+    aliceId = a.id;
+    const { body: b } = await req('POST', `/api/trips/${tripId}/participants`, { name: 'Bob' });
+    bobId = b.id;
+  });
+
+  after(async () => {
+    await req('DELETE', `/api/trips/${tripId}`);
+  });
+
+  it('GET /api/ai-enabled returns false when OPENAI_API_KEY is not set', async () => {
+    const { status, body } = await req('GET', '/api/ai-enabled');
+    assert.equal(status, 200);
+    assert.equal(body.enabled, false);
+  });
+
+  it('POST /api/trips/:id/parse-expense returns 503 when OPENAI_API_KEY is not set', async () => {
+    const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+      message: 'Alice paid 45 for dinner',
+    });
+    assert.equal(status, 503);
+    assert.ok(body.error);
+  });
+
+  it('POST /api/trips/:id/parse-expense returns 404 for unknown trip', async () => {
+    const { status } = await req('POST', '/api/trips/nonexistent/parse-expense', {
+      message: 'Alice paid 45 for dinner',
+    });
+    assert.equal(status, 404);
+  });
+
+  it('POST /api/trips/:id/parse-expense returns 400 for missing message', async () => {
+    const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {});
+    assert.equal(status, 400);
+    assert.ok(body.error);
+  });
+
+  it('POST /api/trips/:id/parse-expense returns 400 for empty message', async () => {
+    const { status, body } = await req('POST', `/api/trips/${tripId}/parse-expense`, {
+      message: '   ',
+    });
+    assert.equal(status, 400);
+    assert.ok(body.error);
+  });
+});

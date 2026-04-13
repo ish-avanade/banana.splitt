@@ -124,6 +124,26 @@
         </button>
       </div>
 
+      <!-- AI chat bar (shown only when OPENAI_API_KEY is configured) -->
+      <div id="ai-chat-bar" class="ai-chat-bar hidden" aria-label="Add expense with AI">
+        <div class="ai-chat-header">
+          <span class="ai-chat-icon">✨</span>
+          <span class="ai-chat-label">Add expense with AI</span>
+        </div>
+        <form id="ai-chat-form" class="ai-chat-form">
+          <input
+            id="ai-chat-input"
+            type="text"
+            class="ai-chat-input"
+            placeholder="e.g. Alice paid €45 for dinner, split with everyone except Bob"
+            maxlength="500"
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary ai-chat-send">Send</button>
+        </form>
+        <div id="ai-parsed-results" class="ai-parsed-results"></div>
+      </div>
+
       <!-- Tab panels -->
       <div id="tab-expenses" class="tab-panel">
         <div id="expenses-list" class="expenses-list"></div>

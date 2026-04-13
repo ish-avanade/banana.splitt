@@ -572,3 +572,91 @@ main#main-content {
   .trips-grid { grid-template-columns: 1fr; }
   .modal-box { padding: 1.25rem; }
 }
+
+/* ---- AI chat bar ------------------------------------------ */
+.ai-chat-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow);
+}
+.ai-chat-header {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: .65rem;
+}
+.ai-chat-icon { font-size: 1rem; }
+.ai-chat-form {
+  display: flex;
+  gap: .5rem;
+}
+.ai-chat-input {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .6rem .85rem;
+  font-size: .9rem;
+  color: var(--text);
+  background: var(--bg);
+  transition: border-color .15s, box-shadow .15s;
+}
+.ai-chat-input:focus {
+  outline: none;
+  border-color: var(--yellow-dark);
+  box-shadow: 0 0 0 3px rgba(217,119,6,.15);
+}
+.ai-chat-send { padding: .6rem 1rem; flex-shrink: 0; }
+.ai-chat-send:disabled { opacity: .6; cursor: not-allowed; }
+
+.ai-parsed-results {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  margin-top: .75rem;
+}
+
+/* ---- AI expense confirmation card ------------------------- */
+.ai-expense-card {
+  background: var(--yellow-light);
+  border: 1.5px solid var(--yellow-dark);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+  animation: fadeIn .2s ease;
+}
+.ai-expense-card-body { flex: 1; min-width: 0; }
+.ai-expense-card-desc {
+  font-weight: 700;
+  font-size: .9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.ai-expense-card-meta {
+  font-size: .78rem;
+  color: #78350f;
+  margin-top: .15rem;
+}
+.ai-expense-card-amount {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: #78350f;
+  white-space: nowrap;
+}
+.ai-expense-card-actions { display: flex; gap: .4rem; }
+@media (max-width: 600px) {
+  .ai-chat-form { flex-direction: column; }
+  .ai-chat-send { width: 100%; justify-content: center; }
+}
