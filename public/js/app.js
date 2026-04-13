@@ -350,9 +350,13 @@ function renderExpensesTab(trip, tripId) {
 
     const item = document.createElement('div');
     item.className = 'expense-item';
-    const amountDisplay = expense.originalCurrency
-      ? `${fmt(expense.originalAmount, expense.originalCurrency)} <span class="conversion-note">(≈ ${fmt(expense.amount, trip.currency)})</span>`
-      : fmt(expense.amount, trip.currency);
+
+    // Determine whether to show dual-currency display safely via DOM (not innerHTML)
+    const showConversion = expense.originalCurrency
+      && expense.originalCurrency !== trip.currency
+      && typeof expense.originalAmount === 'number';
+
+    // Use a placeholder token that we'll replace via DOM after setting innerHTML
     item.innerHTML = `
       <div class="expense-icon">💸</div>
       <div class="expense-body">
@@ -363,12 +367,29 @@ function renderExpensesTab(trip, tripId) {
           · <time>${expense.date}</time>
         </div>
       </div>
-      <div class="expense-amount">${amountDisplay}</div>
+      <div class="expense-amount"></div>
       <div class="expense-actions">
         <button class="btn btn-ghost btn-sm edit-expense-btn" aria-label="Edit expense" title="Edit">✏️</button>
         <button class="btn btn-ghost btn-sm delete-expense-btn" aria-label="Delete expense" title="Delete">🗑️</button>
       </div>
     `;
+
+    // Populate amount cell with safe DOM nodes to avoid Intl.NumberFormat throws and XSS
+    const amountCell = item.querySelector('.expense-amount');
+    if (showConversion) {
+      let origText, convText;
+      try { origText = fmt(expense.originalAmount, expense.originalCurrency); } catch { origText = String(expense.originalAmount); }
+      try { convText = fmt(expense.amount, trip.currency); } catch { convText = String(expense.amount); }
+      amountCell.appendChild(document.createTextNode(origText));
+      const note = document.createElement('span');
+      note.className = 'conversion-note';
+      note.textContent = `(≈ ${convText})`;
+      amountCell.appendChild(note);
+    } else {
+      let mainText;
+      try { mainText = fmt(expense.amount, trip.currency); } catch { mainText = String(expense.amount); }
+      amountCell.textContent = mainText;
+    }
     item.querySelector('.edit-expense-btn').addEventListener('click', () =>
       showEditExpenseModal(trip, expense, () => renderTripDetail(tripId))
     );
