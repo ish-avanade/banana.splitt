@@ -241,7 +241,7 @@ app.post('/api/trips/:id/expenses', (req, res) => {
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
-  const { description, amount, paidBy, splitBetween, date } = req.body;
+  const { description, amount, paidBy, splitBetween, date, originalCurrency, originalAmount, convertedAmount } = req.body;
 
   if (!description || typeof description !== 'string' || !description.trim()) {
     return res.status(400).json({ error: 'Expense description is required' });
@@ -269,6 +269,12 @@ app.post('/api/trips/:id/expenses', (req, res) => {
     date: date || new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString(),
   };
+
+  if (originalCurrency && originalCurrency !== trip.currency) {
+    expense.originalCurrency = originalCurrency;
+    expense.originalAmount = typeof originalAmount === 'number' ? originalAmount : amount;
+    expense.convertedAmount = typeof convertedAmount === 'number' ? convertedAmount : amount;
+  }
   trip.expenses.push(expense);
   saveData(data);
   res.status(201).json(expense);
@@ -282,7 +288,7 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
   const expense = trip.expenses.find((e) => e.id === req.params.eid);
   if (!expense) return res.status(404).json({ error: 'Expense not found' });
 
-  const { description, amount, paidBy, splitBetween, date } = req.body;
+  const { description, amount, paidBy, splitBetween, date, originalCurrency, originalAmount, convertedAmount } = req.body;
   if (description !== undefined) expense.description = description.trim();
   if (amount !== undefined) {
     if (typeof amount !== 'number' || amount <= 0) {
@@ -307,6 +313,19 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
     expense.splitBetween = splitBetween;
   }
   if (date !== undefined) expense.date = date;
+
+  if (originalCurrency !== undefined) {
+    if (originalCurrency && originalCurrency !== trip.currency) {
+      expense.originalCurrency = originalCurrency;
+      if (typeof originalAmount === 'number') expense.originalAmount = originalAmount;
+      if (typeof convertedAmount === 'number') expense.convertedAmount = convertedAmount;
+    } else {
+      // Currency changed back to trip currency — clear conversion fields
+      delete expense.originalCurrency;
+      delete expense.originalAmount;
+      delete expense.convertedAmount;
+    }
+  }
 
   saveData(data);
   res.json(expense);
