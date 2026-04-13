@@ -656,6 +656,16 @@ main#main-content {
   white-space: nowrap;
 }
 .ai-expense-card-actions { display: flex; gap: .4rem; }
+.ai-currency-warning {
+  display: inline-block;
+  background: #fef3c7;
+  border: 1px solid #d97706;
+  border-radius: 3px;
+  padding: 0 .3rem;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #92400e;
+}
 @media (max-width: 600px) {
   .ai-chat-form { flex-direction: column; }
   .ai-chat-send { width: 100%; justify-content: center; }

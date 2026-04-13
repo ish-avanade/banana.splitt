@@ -424,43 +424,56 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
     return res.status(400).json({ error: 'message must be 500 characters or fewer' });
   }
 
-  if (!isAiConfigured()) {
+  if (!isAiConfigured() && !process.env.MOCK_AI_RESPONSE) {
     return res.status(503).json({ error: 'AI parsing is not configured. Set AZURE_OPENAI_* or OPENAI_API_KEY env vars.' });
   }
 
   const today = new Date().toISOString().split('T')[0];
   const participantNames = trip.participants.map((p) => p.name).join(', ') || 'none';
 
+  // Default date: most recent expense date, or today if no expenses yet
+  const lastExpenseDate = trip.expenses?.length
+    ? [...trip.expenses].sort((a, b) => b.date.localeCompare(a.date))[0].date
+    : today;
+
   const systemPrompt =
     `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
     `Trip context:\n` +
     `- Participants: ${participantNames}\n` +
-    `- Currency: ${trip.currency}\n` +
-    `- Today's date: ${today}\n\n` +
+    `- Trip currency: ${trip.currency}\n` +
+    `- Default date (if not specified): ${lastExpenseDate}\n\n` +
     `Return ONLY a JSON array of expense objects. Each object must have:\n` +
     `- description: string (what was bought/paid for)\n` +
     `- amount: number (positive, no currency symbols)\n` +
-    `- paidBy: string (name of who paid, must match one of the participants)\n` +
-    `- splitBetween: array of strings (participant names sharing this expense)\n` +
-    `- date: string (YYYY-MM-DD, use today if not specified)\n\n` +
-    `If you cannot confidently parse the expense return an empty array [].\n` +
+    `- paidBy: string (name of who paid — may be a new person not in the participants list)\n` +
+    `- splitBetween: array of strings (participant names sharing this expense; if not specified use ALL participants: ${participantNames})\n` +
+    `- date: string (YYYY-MM-DD; use the default date above if not specified)\n` +
+    `- currency: string (ISO currency code — interpret written names: "euros"→EUR, "dollars"→USD, "pounds"→GBP, "yen"→JPY, "rupees"→INR; default to ${trip.currency} if not mentioned)\n\n` +
+    `Rules:\n` +
+    `- The payer may be someone not yet in the participants list — include their name anyway.\n` +
+    `- Only return [] if the message is clearly not an expense (e.g. a greeting). If you can extract a description and amount, return a result using reasonable defaults.\n` +
     `Return only the JSON array, no other text, no markdown fences.`;
 
   try {
-    const aiReq = buildAiRequest(systemPrompt, message.trim());
-    const aiRes = await fetch(aiReq.url, {
-      method: 'POST',
-      headers: aiReq.headers,
-      body: aiReq.body,
-    });
+    let rawContent;
+    if (process.env.MOCK_AI_RESPONSE) {
+      rawContent = process.env.MOCK_AI_RESPONSE;
+    } else {
+      const aiReq = buildAiRequest(systemPrompt, message.trim());
+      const aiRes = await fetch(aiReq.url, {
+        method: 'POST',
+        headers: aiReq.headers,
+        body: aiReq.body,
+      });
 
-    if (!aiRes.ok) {
-      const errBody = await aiRes.json().catch(() => ({}));
-      return res.status(502).json({ error: errBody.error?.message || 'AI service error' });
+      if (!aiRes.ok) {
+        const errBody = await aiRes.json().catch(() => ({}));
+        return res.status(502).json({ error: errBody.error?.message || 'AI service error' });
+      }
+
+      const aiData = await aiRes.json();
+      rawContent = aiData.choices?.[0]?.message?.content || '[]';
     }
-
-    const aiData = await aiRes.json();
-    const rawContent = aiData.choices?.[0]?.message?.content || '[]';
 
     let parsed;
     try {
@@ -473,7 +486,9 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       return res.status(422).json({ error: 'AI returned unexpected format' });
     }
 
-    // Map participant names to IDs (case-insensitive fuzzy match)
+    // Map participant names to IDs (case-insensitive fuzzy match), auto-creating if not found
+    let participantsChanged = false;
+
     function findParticipant(name) {
       const lower = (name || '').toLowerCase().trim();
       return (
@@ -484,10 +499,21 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       );
     }
 
+    function findOrCreateParticipant(name) {
+      const trimmed = (name || '').trim();
+      if (!trimmed) return null;
+      const existing = findParticipant(trimmed);
+      if (existing) return existing;
+      const newParticipant = { id: uuidv4(), name: trimmed };
+      trip.participants.push(newParticipant);
+      participantsChanged = true;
+      return newParticipant;
+    }
+
     const expenses = parsed.map((item) => {
-      const payer = findParticipant(item.paidBy);
+      const payer = findOrCreateParticipant(item.paidBy);
       const splitParticipants = Array.isArray(item.splitBetween)
-        ? item.splitBetween.map(findParticipant).filter(Boolean)
+        ? item.splitBetween.map(findOrCreateParticipant).filter(Boolean)
         : [];
       return {
         description: String(item.description || '').trim(),
@@ -496,9 +522,14 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
         paidByName: payer ? payer.name : (item.paidBy || null),
         splitBetween: splitParticipants.map((p) => p.id),
         splitBetweenNames: splitParticipants.map((p) => p.name),
-        date: item.date || today,
+        date: item.date || lastExpenseDate,
+        currency: item.currency || trip.currency,
       };
     });
+
+    if (participantsChanged) {
+      saveData(data);
+    }
 
     res.json({ expenses });
   } catch (err) {

@@ -980,8 +980,10 @@ function renderAiExpenseCard(trip, parsed, tripId) {
   const card = document.createElement('div');
   card.className = 'ai-expense-card';
 
-  const payerName  = parsed.paidByName || '?';
-  const splitNames = parsed.splitBetweenNames?.join(', ') || '?';
+  const payerName      = parsed.paidByName || '?';
+  const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
+  const displayCurrency = parsed.currency || trip.currency;
+  const currencyMismatch = parsed.currency && parsed.currency !== trip.currency;
 
   card.innerHTML = `
     <div class="ai-expense-card-body">
@@ -990,9 +992,10 @@ function renderAiExpenseCard(trip, parsed, tripId) {
         Paid by <strong>${escHtml(payerName)}</strong>
         · Split: ${escHtml(splitNames)}
         · <time>${escHtml(parsed.date || '')}</time>
+        ${currencyMismatch ? `· <span class="ai-currency-warning">⚠ Currency: ${escHtml(parsed.currency)} (trip uses ${escHtml(trip.currency)})</span>` : ''}
       </div>
     </div>
-    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, trip.currency)}</div>
+    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, displayCurrency)}</div>
     <div class="ai-expense-card-actions">
       <button class="btn btn-primary btn-sm ai-add-btn">Add</button>
       <button class="btn btn-secondary btn-sm ai-edit-btn">Edit</button>
