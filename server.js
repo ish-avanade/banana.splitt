@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -358,9 +360,54 @@ app.get('/api/trips/:id/balances', (req, res) => {
 // API Routes — AI Parse Expense
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// AI provider helpers
+// ---------------------------------------------------------------------------
+
+function isAiConfigured() {
+  return !!(process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_DEPLOYMENT)
+    || !!process.env.OPENAI_API_KEY;
+}
+
+function buildAiRequest(systemPrompt, userMessage) {
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+
+  // Azure OpenAI
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_DEPLOYMENT) {
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT.replace(/\/$/, '');
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview';
+    return {
+      url: `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`,
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': process.env.AZURE_OPENAI_API_KEY,
+      },
+      body: JSON.stringify({ messages, temperature: 0 }),
+    };
+  }
+
+  // Direct OpenAI
+  return {
+    url: 'https://api.openai.com/v1/chat/completions',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages,
+      temperature: 0,
+    }),
+  };
+}
+
 // Report whether the AI feature is available
 app.get('/api/ai-enabled', (req, res) => {
-  res.json({ enabled: !!process.env.OPENAI_API_KEY });
+  res.json({ enabled: isAiConfigured() });
 });
 
 // Parse a natural-language message into structured expense(s)
@@ -377,8 +424,8 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
     return res.status(400).json({ error: 'message must be 500 characters or fewer' });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(503).json({ error: 'AI parsing is not configured (no OPENAI_API_KEY set)' });
+  if (!isAiConfigured()) {
+    return res.status(503).json({ error: 'AI parsing is not configured. Set AZURE_OPENAI_* or OPENAI_API_KEY env vars.' });
   }
 
   const today = new Date().toISOString().split('T')[0];
@@ -400,20 +447,11 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
     `Return only the JSON array, no other text, no markdown fences.`;
 
   try {
-    const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    const aiReq = buildAiRequest(systemPrompt, message.trim());
+    const aiRes = await fetch(aiReq.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message.trim() },
-        ],
-        temperature: 0,
-      }),
+      headers: aiReq.headers,
+      body: aiReq.body,
     });
 
     if (!aiRes.ok) {
