@@ -799,13 +799,11 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
           const date2 = date || new Date().toISOString().split('T')[0];
           const url = `https://api.frankfurter.dev/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
           const res = await fetch(url);
-          if (res.ok) {
-            const data = await res.json();
-            const converted = data.rates[trip.currency];
-            if (typeof converted === 'number') {
-              amount = Math.round(converted * 100) / 100;
-            }
-          }
+          if (!res.ok) throw new Error('rate fetch failed');
+          const data = await res.json();
+          const converted = data.rates?.[trip.currency];
+          if (typeof converted !== 'number') throw new Error('rate missing');
+          amount = Math.round(converted * 100) / 100;
         } catch {
           toast('Exchange rate unavailable — using 1:1 conversion', 'error');
         }
