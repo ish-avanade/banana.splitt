@@ -431,11 +431,17 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
   const participantNames = trip.participants.map((p) => p.name).join(', ') || 'none';
 
-  // Default date: most recent expense date, or today if no expenses yet
-  const lastExpenseDate = trip.expenses?.length
-    ? [...trip.expenses].sort((a, b) => b.date.localeCompare(a.date))[0].date
-    : today;
+  // Default date: most recent valid expense date, or today if none exist
+  const lastExpenseDate = (trip.expenses || []).reduce((latest, expense) => {
+    const expenseDate =
+      typeof expense?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expense.date)
+        ? expense.date
+        : null;
 
+    if (!expenseDate) return latest;
+    if (!latest || expenseDate > latest) return expenseDate;
+    return latest;
+  }, null) || today;
   const systemPrompt =
     `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
     `Trip context:\n` +
