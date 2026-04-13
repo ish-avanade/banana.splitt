@@ -373,6 +373,9 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'message is required' });
   }
+  if (message.length > 500) {
+    return res.status(400).json({ error: 'message must be 500 characters or fewer' });
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return res.status(503).json({ error: 'AI parsing is not configured (no OPENAI_API_KEY set)' });
