@@ -486,7 +486,8 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       return res.status(422).json({ error: 'AI returned unexpected format' });
     }
 
-    // Map participant names to IDs (case-insensitive fuzzy match), auto-creating if not found
+    // Map participant names to IDs (case-insensitive fuzzy match), auto-creating if not found.
+    // `participantsChanged` is local to this request handler invocation (per-request scope).
     let participantsChanged = false;
 
     function findParticipant(name) {
