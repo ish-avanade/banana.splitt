@@ -693,6 +693,7 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
 
   // Live conversion preview
   let conversionRate = null;
+  let lastConvertedAmount = null;
   let conversionTimeout = null;
 
   async function updateConversionPreview() {
@@ -702,8 +703,9 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     const preview = document.getElementById('conversion-preview');
 
     if (expCurrency === trip.currency || !amountVal || amountVal <= 0) {
-      preview.textContent = expCurrency !== trip.currency ? '' : `Enter amount in ${expCurrency}`;
+      preview.textContent = '';
       conversionRate = null;
+      lastConvertedAmount = null;
       return;
     }
 
@@ -717,9 +719,11 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       const converted = data.rates[trip.currency];
       if (typeof converted !== 'number') throw new Error('Rate unavailable');
       conversionRate = converted / amountVal;
-      preview.textContent = `≈ ${fmt(converted, trip.currency)} at ${conversionRate.toFixed(4)} rate`;
+      lastConvertedAmount = Math.round(converted * 100) / 100;
+      preview.textContent = `≈ ${fmt(lastConvertedAmount, trip.currency)} at ${conversionRate.toFixed(4)} rate`;
     } catch {
       conversionRate = null;
+      lastConvertedAmount = null;
       preview.textContent = 'Could not fetch rate — will use 1:1';
     }
   }
@@ -763,7 +767,11 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
 
     if (expCurrency !== trip.currency) {
       if (conversionRate !== null) {
-        amount = Math.round(rawAmount * conversionRate * 100) / 100;
+        // Use lastConvertedAmount when amount matches the preview, else reapply rate
+        const previewAmount = parseFloat(document.getElementById('exp-amount').value);
+        amount = lastConvertedAmount !== null && previewAmount === rawAmount
+          ? lastConvertedAmount
+          : Math.round(rawAmount * conversionRate * 100) / 100;
       } else {
         // Fallback: try one more fetch; if fails, use 1:1
         try {
@@ -775,13 +783,11 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
             const converted = data.rates[trip.currency];
             if (typeof converted === 'number') {
               amount = Math.round(converted * 100) / 100;
-              conversionRate = converted / rawAmount;
             }
           }
         } catch {
           toast('Exchange rate unavailable — using 1:1 conversion', 'error');
         }
-        if (conversionRate === null) amount = rawAmount;
       }
       extraFields = {
         originalCurrency: expCurrency,
