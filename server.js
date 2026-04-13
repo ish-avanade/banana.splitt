@@ -128,6 +128,9 @@ app.get('/api/trips', (req, res) => {
     name: t.name,
     description: t.description,
     currency: t.currency,
+    startDate: t.startDate || null,
+    endDate: t.endDate || null,
+    budget: t.budget || null,
     participantCount: t.participants.length,
     expenseCount: t.expenses.length,
     totalAmount: t.expenses.reduce((sum, e) => sum + e.amount, 0),
@@ -138,7 +141,7 @@ app.get('/api/trips', (req, res) => {
 
 // Create a trip
 app.post('/api/trips', (req, res) => {
-  const { name, description, currency } = req.body;
+  const { name, description, currency, startDate, endDate, budget } = req.body;
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Trip name is required' });
   }
@@ -148,6 +151,9 @@ app.post('/api/trips', (req, res) => {
     name: name.trim(),
     description: (description || '').trim(),
     currency: (currency || 'USD').trim(),
+    startDate: startDate || null,
+    endDate: endDate || null,
+    budget: typeof budget === 'number' && budget > 0 ? budget : null,
     participants: [],
     expenses: [],
     createdAt: new Date().toISOString(),
@@ -165,15 +171,18 @@ app.get('/api/trips/:id', (req, res) => {
   res.json(trip);
 });
 
-// Update a trip's name / description / currency
+// Update a trip's name / description / currency / dates / budget
 app.put('/api/trips/:id', (req, res) => {
   const data = loadData();
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const { name, description, currency } = req.body;
+  const { name, description, currency, startDate, endDate, budget } = req.body;
   if (name !== undefined) trip.name = name.trim();
   if (description !== undefined) trip.description = description.trim();
   if (currency !== undefined) trip.currency = currency.trim();
+  if (startDate !== undefined) trip.startDate = startDate || null;
+  if (endDate !== undefined) trip.endDate = endDate || null;
+  if (budget !== undefined) trip.budget = typeof budget === 'number' && budget > 0 ? budget : null;
   saveData(data);
   res.json(trip);
 });

@@ -184,6 +184,47 @@ describe('Trips API', () => {
     assert.equal(status, 404);
   });
 
+  it('POST /api/trips creates a trip with dates and budget', async () => {
+    const { status, body } = await req('POST', '/api/trips', {
+      name: 'Budget Trip',
+      currency: 'USD',
+      startDate: '2024-07-01',
+      endDate: '2024-07-07',
+      budget: 2500,
+    });
+    assert.equal(status, 201);
+    assert.equal(body.startDate, '2024-07-01');
+    assert.equal(body.endDate, '2024-07-07');
+    assert.equal(body.budget, 2500);
+    // Clean up
+    await req('DELETE', `/api/trips/${body.id}`);
+  });
+
+  it('PUT /api/trips/:id updates startDate, endDate, and budget', async () => {
+    const { status, body } = await req('PUT', `/api/trips/${tripId}`, {
+      startDate: '2024-08-01',
+      endDate: '2024-08-14',
+      budget: 3000,
+    });
+    assert.equal(status, 200);
+    assert.equal(body.startDate, '2024-08-01');
+    assert.equal(body.endDate, '2024-08-14');
+    assert.equal(body.budget, 3000);
+  });
+
+  it('PUT /api/trips/:id clears dates and budget when set to null', async () => {
+    const { status, body } = await req('PUT', `/api/trips/${tripId}`, {
+      startDate: null,
+      endDate: null,
+      budget: null,
+    });
+    assert.equal(status, 200);
+    assert.equal(body.startDate, null);
+    assert.equal(body.endDate, null);
+    assert.equal(body.budget, null);
+  });
+
+
   it('PUT /api/trips/:id updates the trip', async () => {
     const { status, body } = await req('PUT', `/api/trips/${tripId}`, {
       description: 'Updated desc',
