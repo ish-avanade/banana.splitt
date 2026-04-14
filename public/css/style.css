@@ -553,7 +553,7 @@ main#main-content {
   font-size: .8rem;
   color: var(--yellow-dark);
   background: var(--yellow-light);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--yellow);
   border-radius: var(--radius-sm);
   padding: .4rem .65rem;
   line-height: 1.4;
