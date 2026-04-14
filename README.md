@@ -63,3 +63,57 @@ npm test
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `DATA_FILE_OVERRIDE` | `data/trips.json` | Path to the JSON data file |
+
+## Copilot Agents & Prompts
+
+This project includes custom VS Code Copilot agents and prompts for an AI-assisted development workflow.
+
+### Filing Issues
+
+Use `/file-issue` in Copilot Chat to create a detailed, structured issue from a plain description.
+
+```
+/file-issue the pie chart doesn't render on mobile
+/file-issue add receipt scanning --cloud
+```
+
+| Flag | Behavior |
+|------|----------|
+| `--local` (default) | Creates a local issue spec in `.github/issues/` for `@implement` |
+| `--cloud` | Creates the local spec **and** a GitHub Issue assigned to Copilot's cloud agent |
+
+### Implementing Issues
+
+Use `@implement` in Copilot Chat to pick up and build an issue end-to-end.
+
+```
+@implement 001
+@implement 003 --cloud
+```
+
+| Flag | Behavior |
+|------|----------|
+| `--local` (default) | Implements the issue in your VS Code workspace (edits files, runs tests) |
+| `--cloud` | Pushes the issue to GitHub and assigns Copilot's cloud agent to handle it |
+
+### Pushing Issues to GitHub
+
+Use `/push-issues` to bulk-push local issue specs to GitHub Issues assigned to Copilot.
+
+```
+/push-issues all
+/push-issues 001
+```
+
+### Current Issues
+
+| # | Title | Priority |
+|---|-------|----------|
+| 001 | Historical Currency Conversion | High |
+| 002 | Natural Language Expense Entry via AI Chat | High |
+| 003 | Automatic Expense Categorization | Medium |
+| 004 | AI-Generated Trip Summary | Medium |
+| 005 | Smart Split Suggestions | Low |
+| 006 | Payment Reminder Messages | Medium |
+| 007 | Duplicate & Anomaly Detection | Low |
+| 008 | Budget Forecasting | Low |
