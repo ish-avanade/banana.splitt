@@ -202,11 +202,19 @@
             <div class="chart-toggles">
               <button class="chart-toggle active" id="chart-toggle-payer">By Payer</button>
               <button class="chart-toggle" id="chart-toggle-category">By Category</button>
+              <button class="chart-toggle" id="chart-toggle-time">Over Time</button>
+              <button class="chart-toggle" id="chart-toggle-member">By Member</button>
             </div>
           </div>
-          <div class="chart-container">
+          <div class="chart-container" id="pie-chart-container">
             <canvas id="pie-chart" width="260" height="260"></canvas>
             <div class="chart-legend" id="chart-legend"></div>
+          </div>
+          <div class="chart-container bar-chart-container hidden" id="bar-chart-container">
+            <div class="bar-chart-wrap">
+              <canvas id="bar-chart" width="500" height="200"></canvas>
+            </div>
+            <button class="chart-export-btn" id="bar-chart-export" title="Download chart as PNG">📥</button>
           </div>
         </div>
 
