@@ -921,6 +921,10 @@ function expenseModalHTML(trip, expense, prefill = null) {
           `).join('')}
         </div>
       </div>
+      <div class="form-warning hidden" id="expense-warning" role="alert">
+        <span class="form-warning-text" id="expense-warning-text"></span>
+        <button type="button" class="form-warning-dismiss" id="expense-warning-dismiss" aria-label="Dismiss warning">×</button>
+      </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
         <button type="submit" class="btn btn-primary">${expense ? 'Save Changes' : 'Add Expense'}</button>
@@ -1013,6 +1017,66 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       : '1.0000';
     preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
   }
+
+  // Duplicate & anomaly detection — cache stable DOM refs once
+  const amountEl      = document.getElementById('exp-amount');
+  const descEl        = document.getElementById('exp-desc');
+  const dateEl        = document.getElementById('exp-date');
+  const warningEl     = document.getElementById('expense-warning');
+  const warningTextEl = document.getElementById('expense-warning-text');
+
+  const runChecks = () => {
+    const amount = parseFloat(amountEl.value);
+    const desc   = descEl.value.trim();
+    const date   = dateEl.value;
+
+    if (isNaN(amount) || amount <= 0) {
+      warningEl.classList.add('hidden');
+      return;
+    }
+
+    const comparisons = expense
+      ? trip.expenses.filter((e) => e.id !== expense.id)
+      : trip.expenses;
+
+    // Duplicate check: same amount ±5%, same date, description substring match
+    if (desc.length > 0) {
+      const descLower = desc.toLowerCase();
+      const dup = comparisons.find((e) =>
+        e.amount > 0 &&
+        Math.abs(e.amount - amount) / Math.max(e.amount, amount) < 0.05 &&
+        e.date === date &&
+        e.description.toLowerCase().includes(descLower)
+      );
+      if (dup) {
+        warningTextEl.textContent =
+          `⚠️ This looks similar to "${dup.description}" (${fmt(dup.amount, trip.currency)}) added on ${dup.date}`;
+        warningEl.classList.remove('hidden');
+        return;
+      }
+    }
+
+    // Anomaly check: amount > 5× average of existing expenses
+    if (comparisons.length > 0) {
+      const avg = comparisons.reduce((s, e) => s + e.amount, 0) / comparisons.length;
+      if (amount > avg * 5) {
+        warningTextEl.textContent =
+          `⚠️ This is much larger than your average expense (${fmt(avg, trip.currency)}). Double-check the amount.`;
+        warningEl.classList.remove('hidden');
+        return;
+      }
+    }
+
+    warningEl.classList.add('hidden');
+  };
+
+  amountEl.addEventListener('blur', runChecks);
+  amountEl.addEventListener('input', runChecks);
+  descEl.addEventListener('input', runChecks);
+  dateEl.addEventListener('change', runChecks);
+  document.getElementById('expense-warning-dismiss').addEventListener('click', () => {
+    warningEl.classList.add('hidden');
+  });
 
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
     e.preventDefault();
