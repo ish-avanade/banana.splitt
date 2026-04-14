@@ -141,6 +141,35 @@ function avatarStyle(name) {
 }
 
 // ---------------------------------------------------------------------------
+// Expense categorizer
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = [
+  { name: 'Food & Drink',  icon: '🍽️', color: '#F97316', keywords: ['dinner','lunch','breakfast','restaurant','cafe','coffee','bar','beer','wine','groceries','food','pizza','sushi','burger','snack','drink','brunch','bakery','meal','drinks','takeaway','takeout'] },
+  { name: 'Transport',     icon: '🚗', color: '#3B82F6', keywords: ['taxi','uber','lyft','bus','train','metro','flight','gas','parking','car','fuel','subway','tram','ferry','bike','scooter','transport','transit','toll','rental','airport'] },
+  { name: 'Accommodation', icon: '🏨', color: '#8B5CF6', keywords: ['hotel','hostel','airbnb','accommodation','motel','resort','apartment','lodge','inn','stay','room','villa'] },
+  { name: 'Activities',    icon: '🎯', color: '#10B981', keywords: ['tour','ticket','museum','concert','show','activity','sport','game','park','attraction','event','festival','class','lesson','excursion','entrance','adventure','theatre','theater','cinema','movie'] },
+  { name: 'Shopping',      icon: '🛍️', color: '#EC4899', keywords: ['shopping','shop','store','market','mall','souvenir','clothes','clothing','gift','buy','purchase','supermarket'] },
+  { name: 'Other',         icon: '📦', color: '#9CA3AF', keywords: [] },
+];
+
+function categorize(description) {
+  const lower = (description || '').toLowerCase();
+  for (const cat of CATEGORIES) {
+    if (cat.keywords.some((kw) => lower.includes(kw))) return cat.name;
+  }
+  return 'Other';
+}
+
+function categoryIcon(name) {
+  return CATEGORIES.find((c) => c.name === name)?.icon || '📦';
+}
+
+function categoryColor(name) {
+  return CATEGORIES.find((c) => c.name === name)?.color || '#9CA3AF';
+}
+
+// ---------------------------------------------------------------------------
 // HOME PAGE
 // ---------------------------------------------------------------------------
 
@@ -349,6 +378,7 @@ function renderExpensesTab(trip, tripId) {
       .map((id) => trip.participants.find((p) => p.id === id)?.name || '?')
       .join(', ');
 
+    const catName = expense.category || categorize(expense.description);
     const item = document.createElement('div');
     item.className = 'expense-item';
 
@@ -359,7 +389,7 @@ function renderExpensesTab(trip, tripId) {
 
     // Use a placeholder token that we'll replace via DOM after setting innerHTML
     item.innerHTML = `
-      <div class="expense-icon">💸</div>
+      <div class="expense-icon">${categoryIcon(catName)}</div>
       <div class="expense-body">
         <div class="expense-desc">${escHtml(expense.description)}</div>
         <div class="expense-meta">
@@ -436,8 +466,50 @@ function renderDashboard(trip) {
   }
   chartSection.classList.remove('hidden');
 
-  drawPieChart(document.getElementById('pie-chart'), slices, trip.currency);
-  renderChartLegend(document.getElementById('chart-legend'), slices, total, trip.currency);
+  const canvas     = document.getElementById('pie-chart');
+  const legendEl   = document.getElementById('chart-legend');
+  const togglePayer = document.getElementById('chart-toggle-payer');
+  const toggleCat   = document.getElementById('chart-toggle-category');
+
+  function showPayerChart() {
+    togglePayer.classList.add('active');
+    toggleCat.classList.remove('active');
+    drawPieChart(canvas, slices, trip.currency);
+    renderChartLegend(legendEl, slices, total, trip.currency);
+  }
+
+  function showCategoryChart() {
+    togglePayer.classList.remove('active');
+    toggleCat.classList.add('active');
+    renderCategoryChart(canvas, legendEl, trip);
+  }
+
+  togglePayer.addEventListener('click', showPayerChart);
+  toggleCat.addEventListener('click', showCategoryChart);
+
+  showPayerChart();
+}
+
+function renderCategoryChart(canvas, legendContainer, trip) {
+  const total = trip.expenses.reduce((s, e) => s + e.amount, 0);
+
+  const byCategory = {};
+  for (const e of trip.expenses) {
+    const catName = e.category || categorize(e.description);
+    byCategory[catName] = (byCategory[catName] || 0) + e.amount;
+  }
+
+  const slices = CATEGORIES
+    .filter((cat) => byCategory[cat.name] > 0)
+    .map((cat) => ({
+      name: `${cat.icon} ${cat.name}`,
+      amount: byCategory[cat.name],
+      color: cat.color,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  drawPieChart(canvas, slices, trip.currency);
+  renderChartLegend(legendContainer, slices, total, trip.currency);
 }
 
 function drawPieChart(canvas, slices, currency) {
@@ -465,7 +537,7 @@ function drawPieChart(canvas, slices, currency) {
     ctx.arc(cx, cy, radius, startAngle, endAngle);
     ctx.arc(cx, cy, innerRadius, endAngle, startAngle, true);
     ctx.closePath();
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+    ctx.fillStyle = slice.color || PIE_COLORS[i % PIE_COLORS.length];
     ctx.fill();
 
     // Subtle separator
@@ -490,10 +562,11 @@ function renderChartLegend(container, slices, total, currency) {
   container.innerHTML = '';
   slices.forEach((slice, i) => {
     const pct = ((slice.amount / total) * 100).toFixed(1);
+    const color = slice.color || PIE_COLORS[i % PIE_COLORS.length];
     const div = document.createElement('div');
     div.className = 'legend-item';
     div.innerHTML = `
-      <span class="legend-dot" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>
+      <span class="legend-dot" style="background:${color}"></span>
       <span class="legend-name">${escHtml(slice.name)}</span>
       <span class="legend-value">${fmt(slice.amount, currency)}</span>
       <span class="legend-pct">${pct}%</span>
@@ -638,6 +711,7 @@ function expenseModalHTML(trip, expense, prefill = null) {
   // When editing, show original amount if a foreign currency was used
   const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : (vals?.amount || ''));
   const expCurrency = expense?.originalCurrency || trip.currency;
+  const currentCat = expense?.category || categorize(vals?.description || '');
 
   return `
     <h2 class="modal-title">${expense ? 'Edit Expense' : 'Add Expense'}</h2>
@@ -659,6 +733,12 @@ function expenseModalHTML(trip, expense, prefill = null) {
           </select>
         </div>
         <div id="conversion-preview" style="font-size:.8rem;color:var(--text-muted);margin-top:.25rem;min-height:1.2em"></div>
+      </div>
+      <div class="form-group">
+        <label for="exp-category">Category</label>
+        <select id="exp-category">
+          ${CATEGORIES.map((c) => `<option value="${escAttr(c.name)}"${currentCat === c.name ? ' selected' : ''}>${c.icon} ${escHtml(c.name)}</option>`).join('')}
+        </select>
       </div>
       <div class="form-group">
         <label for="exp-date">Date</label>
@@ -715,6 +795,14 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       cb.checked = true;
     });
   });
+
+  // Auto-categorize when description changes (only for new expenses)
+  if (!expense) {
+    document.getElementById('exp-desc').addEventListener('input', () => {
+      const desc = document.getElementById('exp-desc').value.trim();
+      document.getElementById('exp-category').value = categorize(desc);
+    });
+  }
 
   // Live conversion preview
   let conversionRate = null;
@@ -778,6 +866,7 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     const paidBy      = document.getElementById('exp-paidby').value;
     const expCurrency = document.getElementById('exp-currency').value;
     const rawAmount   = parseFloat(document.getElementById('exp-amount').value);
+    const category    = document.getElementById('exp-category').value;
     const splitBetween = [...document.querySelectorAll('#split-checkboxes input:checked')]
       .map((cb) => cb.value);
 
@@ -827,12 +916,12 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     try {
       if (expense) {
         await put(`/trips/${trip.id}/expenses/${expense.id}`, {
-          description, amount, date, paidBy, splitBetween, ...extraFields,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense updated', 'success');
       } else {
         await post(`/trips/${trip.id}/expenses`, {
-          description, amount, date, paidBy, splitBetween, ...extraFields,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense added 💸', 'success');
       }

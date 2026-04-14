@@ -243,7 +243,7 @@ app.post('/api/trips/:id/expenses', (req, res) => {
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
-  const { description, amount, paidBy, splitBetween, date, originalCurrency, originalAmount, convertedAmount } = req.body;
+  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
 
   if (!description || typeof description !== 'string' || !description.trim()) {
     return res.status(400).json({ error: 'Expense description is required' });
@@ -271,6 +271,7 @@ app.post('/api/trips/:id/expenses', (req, res) => {
     date: date || new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString(),
   };
+  if (category !== undefined) expense.category = String(category).trim();
 
   if (originalCurrency && originalCurrency !== trip.currency) {
     expense.originalCurrency = originalCurrency;
@@ -290,7 +291,7 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
   const expense = trip.expenses.find((e) => e.id === req.params.eid);
   if (!expense) return res.status(404).json({ error: 'Expense not found' });
 
-  const { description, amount, paidBy, splitBetween, date, originalCurrency, originalAmount, convertedAmount } = req.body;
+  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
   if (description !== undefined) expense.description = description.trim();
   if (amount !== undefined) {
     if (typeof amount !== 'number' || amount <= 0) {
@@ -315,6 +316,7 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
     expense.splitBetween = splitBetween;
   }
   if (date !== undefined) expense.date = date;
+  if (category !== undefined) expense.category = String(category).trim();
 
   if (originalCurrency !== undefined) {
     if (originalCurrency && originalCurrency !== trip.currency) {
