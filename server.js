@@ -117,6 +117,33 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Validate optional date fields startDate/endDate.
+ * Returns an error string if invalid, null if valid.
+ */
+function validateDates(startDate, endDate) {
+  if (startDate != null) {
+    if (typeof startDate !== 'string' || !DATE_RE.test(startDate)) {
+      return 'startDate must be a date in YYYY-MM-DD format';
+    }
+  }
+  if (endDate != null) {
+    if (typeof endDate !== 'string' || !DATE_RE.test(endDate)) {
+      return 'endDate must be a date in YYYY-MM-DD format';
+    }
+  }
+  if (startDate && endDate && endDate < startDate) {
+    return 'endDate must be on or after startDate';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // API Routes — Trips
 // ---------------------------------------------------------------------------
 
@@ -128,9 +155,9 @@ app.get('/api/trips', (req, res) => {
     name: t.name,
     description: t.description,
     currency: t.currency,
-    startDate: t.startDate || null,
-    endDate: t.endDate || null,
-    budget: t.budget || null,
+    startDate: t.startDate ?? null,
+    endDate: t.endDate ?? null,
+    budget: t.budget ?? null,
     participantCount: t.participants.length,
     expenseCount: t.expenses.length,
     totalAmount: t.expenses.reduce((sum, e) => sum + e.amount, 0),
@@ -145,6 +172,8 @@ app.post('/api/trips', (req, res) => {
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Trip name is required' });
   }
+  const dateError = validateDates(startDate ?? null, endDate ?? null);
+  if (dateError) return res.status(400).json({ error: dateError });
   const data = loadData();
   const trip = {
     id: uuidv4(),
@@ -177,6 +206,10 @@ app.put('/api/trips/:id', (req, res) => {
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   const { name, description, currency, startDate, endDate, budget } = req.body;
+  const newStart = startDate !== undefined ? (startDate || null) : trip.startDate;
+  const newEnd   = endDate   !== undefined ? (endDate   || null) : trip.endDate;
+  const dateError = validateDates(newStart, newEnd);
+  if (dateError) return res.status(400).json({ error: dateError });
   if (name !== undefined) trip.name = name.trim();
   if (description !== undefined) trip.description = description.trim();
   if (currency !== undefined) trip.currency = currency.trim();

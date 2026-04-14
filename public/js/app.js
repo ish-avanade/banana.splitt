@@ -245,7 +245,8 @@ function showNewTripModal() {
     const startDate = document.getElementById('trip-start-date').value || null;
     const endDate   = document.getElementById('trip-end-date').value || null;
     const budgetVal = document.getElementById('trip-budget').value;
-    const budget    = budgetVal ? parseFloat(budgetVal) : null;
+    const parsedBudget = parseFloat(budgetVal);
+    const budget    = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
     try {
       await post('/trips', { name, description: desc, currency, startDate, endDate, budget });
       closeModal();
@@ -320,8 +321,9 @@ function showTripSettingsModal(trip, onSuccess) {
     const desc      = document.getElementById('settings-desc').value.trim();
     const startDate = document.getElementById('settings-start-date').value || null;
     const endDate   = document.getElementById('settings-end-date').value || null;
-    const budgetVal = document.getElementById('settings-budget').value;
-    const budget    = budgetVal ? parseFloat(budgetVal) : null;
+    const budgetVal    = document.getElementById('settings-budget').value;
+    const parsedBudget = parseFloat(budgetVal);
+    const budget       = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
     try {
       await put(`/trips/${trip.id}`, { name, description: desc, startDate, endDate, budget });
       closeModal();
@@ -509,9 +511,20 @@ function renderForecast(trip, total, memberCount) {
   start.setHours(0, 0, 0, 0);
   end.setHours(0, 0, 0, 0);
 
+  // Guard against invalid or reversed dates
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    section.classList.add('hidden');
+    return;
+  }
+
   const MS_PER_DAY  = 1000 * 60 * 60 * 24;
   const totalDays   = Math.round((end - start) / MS_PER_DAY) + 1;
   const daysElapsed = Math.round((now - start) / MS_PER_DAY) + 1;
+
+  if (totalDays < 1) {
+    section.classList.add('hidden');
+    return;
+  }
 
   const iconEl   = document.getElementById('forecast-icon');
   const textEl   = document.getElementById('forecast-text');
@@ -576,7 +589,7 @@ function renderForecast(trip, total, memberCount) {
     }
   }
 
-  iconEl.textContent = trip.budget ? '' : icon;
+  iconEl.textContent = icon;
   textEl.textContent = msg;
   card.className = `forecast-card forecast-${colorClass}`;
 

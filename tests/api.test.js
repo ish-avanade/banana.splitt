@@ -196,8 +196,35 @@ describe('Trips API', () => {
     assert.equal(body.startDate, '2024-07-01');
     assert.equal(body.endDate, '2024-07-07');
     assert.equal(body.budget, 2500);
+    // Also verify GET /api/trips list includes these fields
+    const { body: list } = await req('GET', '/api/trips');
+    const listed = list.find((t) => t.id === body.id);
+    assert.ok(listed, 'trip should appear in GET /api/trips list');
+    assert.equal(listed.startDate, '2024-07-01');
+    assert.equal(listed.endDate, '2024-07-07');
+    assert.equal(listed.budget, 2500);
     // Clean up
     await req('DELETE', `/api/trips/${body.id}`);
+  });
+
+  it('POST /api/trips rejects invalid startDate format', async () => {
+    const { status, body: err } = await req('POST', '/api/trips', {
+      name: 'Bad Dates',
+      startDate: 'not-a-date',
+      endDate: '2024-07-07',
+    });
+    assert.equal(status, 400);
+    assert.ok(err.error);
+  });
+
+  it('POST /api/trips rejects endDate before startDate', async () => {
+    const { status, body: err } = await req('POST', '/api/trips', {
+      name: 'Reversed Dates',
+      startDate: '2024-07-07',
+      endDate: '2024-07-01',
+    });
+    assert.equal(status, 400);
+    assert.ok(err.error);
   });
 
   it('PUT /api/trips/:id updates startDate, endDate, and budget', async () => {
