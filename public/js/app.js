@@ -920,6 +920,7 @@ function expenseModalHTML(trip, expense, prefill = null) {
             </label>
           `).join('')}
         </div>
+        <div id="split-hint" class="split-hint hidden"></div>
       </div>
       <div class="form-warning hidden" id="expense-warning" role="alert">
         <span class="form-warning-text" id="expense-warning-text"></span>
@@ -947,6 +948,17 @@ function showEditExpenseModal(trip, expense, onSuccess) {
   attachExpenseFormHandlers(trip, expense, onSuccess);
 }
 
+// Maps category names (from CATEGORIES) to split hint messages.
+// Reuses the same keyword system so both features stay in sync automatically.
+const SPLIT_HINT_BY_CATEGORY = {
+  'Accommodation': 'This looks like accommodation — consider splitting between specific people only?',
+  'Transport':     'This looks like transport — consider splitting between specific people only?',
+};
+
+function getSplitHint(cat) {
+  return SPLIT_HINT_BY_CATEGORY[cat] || null;
+}
+
 function attachExpenseFormHandlers(trip, expense, onSuccess) {
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   document.getElementById('split-all-btn').addEventListener('click', () => {
@@ -955,13 +967,30 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     });
   });
 
-  // Auto-categorize when description changes (only for new expenses)
-  if (!expense) {
-    document.getElementById('exp-desc').addEventListener('input', () => {
-      const desc = document.getElementById('exp-desc').value.trim();
-      document.getElementById('exp-category').value = categorize(desc);
-    });
+  const descInput = document.getElementById('exp-desc');
+  const hintEl    = document.getElementById('split-hint');
+  function onDescInput() {
+    const desc = descInput.value.trim();
+    const cat  = categorize(desc);
+
+    // Update split hint
+    const hint = getSplitHint(cat);
+    if (hint) {
+      hintEl.textContent = '💡 ' + hint;
+      hintEl.classList.remove('hidden');
+    } else {
+      hintEl.textContent = '';
+      hintEl.classList.add('hidden');
+    }
+
+    // Auto-categorize (only for new expenses)
+    if (!expense) {
+      document.getElementById('exp-category').value = cat;
+    }
   }
+  descInput.addEventListener('input', onDescInput);
+  // Evaluate immediately for pre-filled descriptions (edit flow)
+  onDescInput();
 
   // Live conversion preview
   let conversionRate = null;

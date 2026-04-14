@@ -548,6 +548,17 @@ main#main-content {
   text-decoration: underline;
 }
 
+.split-hint {
+  margin-top: .5rem;
+  font-size: .8rem;
+  color: var(--yellow-dark);
+  background: var(--yellow-light);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-sm);
+  padding: .4rem .65rem;
+  line-height: 1.4;
+}
+
 .form-actions {
   display: flex;
   gap: .75rem;
