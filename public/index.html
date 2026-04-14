@@ -106,9 +106,12 @@
           <h1 class="trip-title"></h1>
           <p class="trip-subtitle"></p>
         </div>
-        <button class="btn btn-primary" id="btn-add-expense">
-          <span class="btn-icon">+</span> Add Expense
-        </button>
+        <div class="page-header-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-trip-settings" title="Trip settings">⚙️ Settings</button>
+          <button class="btn btn-primary" id="btn-add-expense">
+            <span class="btn-icon">+</span> Add Expense
+          </button>
+        </div>
       </div>
 
       <!-- Tabs -->
@@ -172,6 +175,23 @@
           <div class="dash-card dash-avg">
             <div class="dash-card-label">Per Person</div>
             <div class="dash-card-value" id="dash-avg">$0</div>
+          </div>
+        </div>
+
+        <!-- Forecast section (shown when dates are set) -->
+        <div class="forecast-section hidden" id="forecast-section">
+          <h2 class="section-title">Budget Forecast</h2>
+          <div class="forecast-card" id="forecast-card">
+            <div class="forecast-header">
+              <span class="forecast-icon" id="forecast-icon"></span>
+              <span class="forecast-text" id="forecast-text"></span>
+            </div>
+            <div class="forecast-bar-wrap hidden" id="forecast-bar-wrap">
+              <div class="forecast-bar">
+                <div class="forecast-bar-fill" id="forecast-bar-fill"></div>
+              </div>
+              <span class="forecast-bar-label" id="forecast-bar-label"></span>
+            </div>
           </div>
         </div>
 

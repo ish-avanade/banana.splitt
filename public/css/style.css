@@ -566,6 +566,79 @@ main#main-content {
   margin-top: 1.25rem;
 }
 
+/* ---- Forecast card ---------------------------------------- */
+.forecast-section { margin-bottom: 2rem; }
+.forecast-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+.forecast-card.forecast-ok   { border-left: 4px solid var(--green); }
+.forecast-card.forecast-warn { border-left: 4px solid var(--yellow-dark); }
+.forecast-card.forecast-over { border-left: 4px solid var(--red); }
+.forecast-header {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  font-size: .93rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.forecast-icon { font-size: 1.1rem; flex-shrink: 0; }
+.forecast-text { flex: 1; }
+.forecast-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+.forecast-bar {
+  flex: 1;
+  height: 10px;
+  background: var(--border);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.forecast-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .4s ease;
+}
+.forecast-bar-fill.fill-ok   { background: var(--green); }
+.forecast-bar-fill.fill-warn { background: linear-gradient(to right, var(--yellow), var(--yellow-dark)); }
+.forecast-bar-fill.fill-over { background: var(--red); }
+.forecast-bar-label {
+  font-size: .78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-weight: 600;
+  min-width: 140px;
+  text-align: right;
+}
+
+/* ---- Form row (side-by-side fields) ----------------------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+}
+@media (max-width: 480px) {
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* ---- Page header actions ---------------------------------- */
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+/* ---- Form warning (duplicate / anomaly detection) --------- */
 .form-warning {
   display: flex;
   align-items: flex-start;

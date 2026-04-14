@@ -244,6 +244,20 @@ function showNewTripModal() {
           ${CURRENCIES.map((c) => `<option value="${c.code}">${c.code} — ${c.name}</option>`).join('')}
         </select>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="trip-start-date">Start Date</label>
+          <input id="trip-start-date" type="date" />
+        </div>
+        <div class="form-group">
+          <label for="trip-end-date">End Date</label>
+          <input id="trip-end-date" type="date" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="trip-budget">Budget (optional)</label>
+        <input id="trip-budget" type="number" step="0.01" min="0.01" placeholder="e.g. 2500.00" />
+      </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
         <button type="submit" class="btn btn-primary">Create Trip</button>
@@ -254,11 +268,16 @@ function showNewTripModal() {
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   document.getElementById('new-trip-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name     = document.getElementById('trip-name').value.trim();
-    const desc     = document.getElementById('trip-desc').value.trim();
-    const currency = document.getElementById('trip-currency').value;
+    const name      = document.getElementById('trip-name').value.trim();
+    const desc      = document.getElementById('trip-desc').value.trim();
+    const currency  = document.getElementById('trip-currency').value;
+    const startDate = document.getElementById('trip-start-date').value || null;
+    const endDate   = document.getElementById('trip-end-date').value || null;
+    const budgetVal = document.getElementById('trip-budget').value;
+    const parsedBudget = parseFloat(budgetVal);
+    const budget    = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
     try {
-      await post('/trips', { name, description: desc, currency });
+      await post('/trips', { name, description: desc, currency, startDate, endDate, budget });
       closeModal();
       toast('Trip created! 🎉', 'success');
       renderHome();
@@ -285,6 +304,60 @@ async function confirmDeleteTrip(trip) {
       closeModal();
       toast('Trip deleted', 'default');
       renderHome();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+function showTripSettingsModal(trip, onSuccess) {
+  openModal(`
+    <h2 class="modal-title">Trip Settings</h2>
+    <form id="trip-settings-form">
+      <div class="form-group">
+        <label for="settings-name">Trip Name *</label>
+        <input id="settings-name" type="text" value="${escAttr(trip.name)}" required maxlength="80" />
+      </div>
+      <div class="form-group">
+        <label for="settings-desc">Description</label>
+        <input id="settings-desc" type="text" value="${escAttr(trip.description || '')}" maxlength="160" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="settings-start-date">Start Date</label>
+          <input id="settings-start-date" type="date" value="${escAttr(trip.startDate || '')}" />
+        </div>
+        <div class="form-group">
+          <label for="settings-end-date">End Date</label>
+          <input id="settings-end-date" type="date" value="${escAttr(trip.endDate || '')}" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="settings-budget">Budget (${escHtml(trip.currency)})</label>
+        <input id="settings-budget" type="number" step="0.01" min="0.01"
+          value="${trip.budget ? trip.budget : ''}" placeholder="e.g. 2500.00" />
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+      </div>
+    </form>
+  `);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('trip-settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name      = document.getElementById('settings-name').value.trim();
+    const desc      = document.getElementById('settings-desc').value.trim();
+    const startDate = document.getElementById('settings-start-date').value || null;
+    const endDate   = document.getElementById('settings-end-date').value || null;
+    const budgetVal    = document.getElementById('settings-budget').value;
+    const parsedBudget = parseFloat(budgetVal);
+    const budget       = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
+    try {
+      await put(`/trips/${trip.id}`, { name, description: desc, startDate, endDate, budget });
+      closeModal();
+      toast('Settings saved ✅', 'success');
+      onSuccess();
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -323,6 +396,11 @@ async function renderTripDetail(tripId) {
     // Add expense button
     main.querySelector('#btn-add-expense').addEventListener('click', () =>
       showAddExpenseModal(trip, () => renderTripDetail(tripId))
+    );
+
+    // Trip settings button
+    main.querySelector('#btn-trip-settings').addEventListener('click', () =>
+      showTripSettingsModal(trip, () => renderTripDetail(tripId))
     );
 
     // Add member button
@@ -453,6 +531,8 @@ function renderDashboard(trip) {
   document.getElementById('dash-avg').textContent =
     memberCount > 0 ? fmt(total / memberCount, trip.currency) : fmt(0, trip.currency);
 
+  renderForecast(trip, total, memberCount);
+
   // Spending per member (who paid)
   const spentByPayer = {};
   for (const p of trip.participants) spentByPayer[p.id] = { name: p.name, amount: 0 };
@@ -515,6 +595,115 @@ function renderCategoryChart(canvas, legendContainer, trip) {
 
   drawPieChart(canvas, slices, trip.currency);
   renderChartLegend(legendContainer, slices, total, trip.currency);
+}
+
+function renderForecast(trip, total, memberCount) {
+  const section = document.getElementById('forecast-section');
+  if (!trip.startDate || !trip.endDate) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  const now   = new Date();
+  const start = new Date(trip.startDate);
+  const end   = new Date(trip.endDate);
+
+  // Normalise to midnight local time for clean day arithmetic
+  now.setHours(0, 0, 0, 0);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+
+  // Guard against invalid or reversed dates
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  const MS_PER_DAY  = 1000 * 60 * 60 * 24;
+  const totalDays   = Math.round((end - start) / MS_PER_DAY) + 1;
+  const daysElapsed = Math.round((now - start) / MS_PER_DAY) + 1;
+
+  if (totalDays < 1) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  const iconEl   = document.getElementById('forecast-icon');
+  const textEl   = document.getElementById('forecast-text');
+  const barWrap  = document.getElementById('forecast-bar-wrap');
+  const barFill  = document.getElementById('forecast-bar-fill');
+  const barLabel = document.getElementById('forecast-bar-label');
+  const card     = document.getElementById('forecast-card');
+
+  section.classList.remove('hidden');
+
+  // Trip hasn't started yet
+  if (daysElapsed < 1) {
+    iconEl.textContent = '📅';
+    textEl.textContent = `trip starts on ${trip.startDate} — no forecast yet.`;
+    barWrap.classList.add('hidden');
+    card.className = 'forecast-card';
+    return;
+  }
+
+  // Trip has ended
+  if (daysElapsed > totalDays) {
+    const perPerson = memberCount > 0 ? fmt(total / memberCount, trip.currency) : null;
+    iconEl.textContent = '🏁';
+    textEl.textContent = `trip ended — final total: ${fmt(total, trip.currency)}${perPerson ? ` (${perPerson}/person)` : ''}.`;
+    // Still show budget bar if budget is set
+    if (trip.budget) {
+      const pct = Math.min((total / trip.budget) * 100, 100);
+      barWrap.classList.remove('hidden');
+      barFill.style.width = pct + '%';
+      barLabel.textContent = `${fmt(total, trip.currency)} of ${fmt(trip.budget, trip.currency)} budget`;
+      const colorClass = total > trip.budget ? 'over' : pct >= 80 ? 'warn' : 'ok';
+      card.className = `forecast-card forecast-${colorClass}`;
+      barFill.className = `forecast-bar-fill fill-${colorClass}`;
+    } else {
+      barWrap.classList.add('hidden');
+      card.className = 'forecast-card';
+    }
+    return;
+  }
+
+  // Trip in progress — project spending
+  const projected = daysElapsed > 0 ? (total / daysElapsed) * totalDays : 0;
+  const perPerson = memberCount > 0 ? fmt(projected / memberCount, trip.currency) : null;
+
+  let colorClass = 'ok';
+  let icon = '✅';
+  let msg  = `Day ${daysElapsed} of ${totalDays} — on pace to spend ${fmt(projected, trip.currency)} total`;
+  if (perPerson) msg += ` (${perPerson}/person)`;
+
+  if (trip.budget) {
+    const ratio = projected / trip.budget;
+    if (ratio > 1) {
+      colorClass = 'over';
+      icon = '⚠️';
+      msg = `Day ${daysElapsed} of ${totalDays} — ⚠️ over budget pace — projected ${fmt(projected, trip.currency)} vs ${fmt(trip.budget, trip.currency)} budget`;
+    } else if (ratio >= 0.8) {
+      colorClass = 'warn';
+      icon = '🟡';
+      msg = `Day ${daysElapsed} of ${totalDays} — projected ${fmt(projected, trip.currency)} vs ${fmt(trip.budget, trip.currency)} budget`;
+    } else {
+      msg = `Day ${daysElapsed} of ${totalDays} — ✅ under budget — projected ${fmt(projected, trip.currency)} vs ${fmt(trip.budget, trip.currency)} budget`;
+    }
+  }
+
+  iconEl.textContent = icon;
+  textEl.textContent = msg;
+  card.className = `forecast-card forecast-${colorClass}`;
+
+  if (trip.budget) {
+    const pct = Math.min((total / trip.budget) * 100, 100);
+    barWrap.classList.remove('hidden');
+    barFill.style.width = pct + '%';
+    barFill.className = `forecast-bar-fill fill-${colorClass}`;
+    barLabel.textContent = `${fmt(total, trip.currency)} spent of ${fmt(trip.budget, trip.currency)} budget (${pct.toFixed(1)}%)`;
+  } else {
+    barWrap.classList.add('hidden');
+  }
 }
 
 function drawPieChart(canvas, slices, currency) {
@@ -1174,12 +1363,106 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
         toast('Expense added 💸', 'success');
       }
       closeModal();
-      onSuccess();
+      await checkAndUpdateTripDates(trip, date, expense?.id, onSuccess);
     } catch (err) {
       toast(err.message, 'error');
     }
   });
 }
+
+/**
+ * Show a styled confirmation modal asking whether to update a trip date boundary.
+ * Resolves true (update) or false (keep current) regardless of how the modal is closed.
+ */
+function dateUpdatePrompt(label, current, proposed) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      closeModal();
+      resolve(val);
+    };
+
+    const labelCap   = label === 'start' ? 'Start' : 'End';
+    const direction  = label === 'start' ? 'before' : 'after';
+
+    openModal(`
+      <h2 class="modal-title">Update Trip ${escHtml(labelCap)} Date?</h2>
+      <p>This expense date (<strong>${escHtml(proposed)}</strong>) is
+      ${direction} the trip ${escHtml(label)} date
+      (<strong>${escHtml(current)}</strong>).</p>
+      <p style="margin-top:.5rem">Update the trip ${escHtml(label)} date to
+      <strong>${escHtml(proposed)}</strong>?</p>
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn btn-secondary" id="date-no-btn">Keep ${escHtml(current)}</button>
+        <button class="btn btn-primary" id="date-yes-btn">Update to ${escHtml(proposed)}</button>
+      </div>
+    `);
+
+    document.getElementById('date-no-btn').addEventListener('click', () => finish(false));
+    document.getElementById('date-yes-btn').addEventListener('click', () => finish(true));
+
+    // Resolve false if modal is closed via X button, Escape, or overlay click
+    const obs = new MutationObserver(() => {
+      if (overlay.classList.contains('hidden')) { obs.disconnect(); finish(false); }
+    });
+    obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+  });
+}
+
+/**
+ * After an expense is saved, check whether the trip's date range should be updated:
+ * - No dates set: silently auto-set start/end from all expense dates.
+ * - Expense predates startDate: prompt the user.
+ * - Expense postdates endDate: prompt the user.
+ * The expense is already saved regardless of the user's choice. onSuccess() is called at the end.
+ */
+async function checkAndUpdateTripDates(trip, expenseDate, editingExpenseId, onSuccess) {
+  if (!expenseDate) { onSuccess(); return; }
+
+  const noStart = !trip.startDate;
+  const noEnd   = !trip.endDate;
+
+  if (noStart && noEnd) {
+    // Auto-set trip dates silently from all expense dates (including the new/edited one)
+    const allDates = trip.expenses
+      .filter(e => e.id !== editingExpenseId)
+      .map(e => e.date)
+      .filter(Boolean);
+    allDates.push(expenseDate);
+    allDates.sort();
+    try {
+      await put(`/trips/${trip.id}`, {
+        startDate: allDates[0],
+        endDate:   allDates[allDates.length - 1],
+      });
+    } catch (_) { /* silently ignore — forecast is non-critical */ }
+    onSuccess();
+    return;
+  }
+
+  if (!noStart && expenseDate < trip.startDate) {
+    const ok = await dateUpdatePrompt('start', trip.startDate, expenseDate);
+    if (ok) {
+      try {
+        await put(`/trips/${trip.id}`, { startDate: expenseDate });
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  }
+
+  if (!noEnd && expenseDate > trip.endDate) {
+    const ok = await dateUpdatePrompt('end', trip.endDate, expenseDate);
+    if (ok) {
+      try {
+        await put(`/trips/${trip.id}`, { endDate: expenseDate });
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  }
+
+  onSuccess();
+}
+
 
 async function confirmDeleteExpense(trip, expense, onSuccess) {
   openModal(`
