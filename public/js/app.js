@@ -604,7 +604,7 @@ function renderDashboard(trip) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, amount]) => ({ label: formatShortDate(date), amount }));
     drawBarChart(barCanvas, bars, trip.currency);
-    barExportBtn.onclick = () => exportCanvasPng(barCanvas, 'spending-over-time.png');
+    barExportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-over-time.png`);
   }
 
   function showMemberChart() {
@@ -615,9 +615,9 @@ function renderDashboard(trip) {
       name: p.name,
       amount: trip.expenses.filter((e) => e.paidBy === p.id).reduce((s, e) => s + e.amount, 0),
       color: PIE_COLORS[i % PIE_COLORS.length],
-    })).sort((a, b) => b.amount - a.amount);
+    })).filter((b) => b.amount > 0).sort((a, b) => b.amount - a.amount);
     drawHorizontalBarChart(barCanvas, bars, trip.currency);
-    barExportBtn.onclick = () => exportCanvasPng(barCanvas, 'spending-by-member.png');
+    barExportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-member.png`);
   }
 
   togglePayer.addEventListener('click', showPayerChart);
@@ -861,7 +861,7 @@ function drawBarChart(canvas, bars, currency) {
   if (maxAmount === 0) return;
 
   const n = bars.length;
-  const barGap  = Math.max(4, Math.floor(chartW / n * 0.2));
+  const barGap  = 4;
   const barW    = Math.floor((chartW - barGap * (n + 1)) / n);
 
   // Gridlines
@@ -929,7 +929,7 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     const y = 20 + i * rowH;
 
     // Member name
-    ctx.fillStyle = '#374151';
+    ctx.fillStyle = '#111827';
     ctx.font = '600 12px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -948,7 +948,7 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     const by     = y + padV;
     const r      = Math.min(4, barH / 2);
 
-    ctx.fillStyle = bar.color || PIE_COLORS[i % PIE_COLORS.length];
+    ctx.fillStyle = (/^#[0-9a-fA-F]{3,8}$/.test(bar.color) ? bar.color : null) || PIE_COLORS[i % PIE_COLORS.length];
     if (barLen > 0) {
       ctx.beginPath();
       ctx.moveTo(bx, by);
@@ -962,7 +962,7 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     }
 
     // Amount label
-    ctx.fillStyle = '#374151';
+    ctx.fillStyle = '#111827';
     ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -970,6 +970,10 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     try { amtStr = fmt(bar.amount, currency); } catch { amtStr = String(bar.amount); }
     ctx.fillText(amtStr, nameW + 4 + barAreaW + 6, y + rowH / 2 - padV);
   });
+}
+
+function sanitizeFilename(name) {
+  return (name || 'trip').replace(/[^a-z0-9-]+/gi, '-').toLowerCase().replace(/^-|-$/g, '');
 }
 
 function exportCanvasPng(canvas, filename) {

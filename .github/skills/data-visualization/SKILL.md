@@ -93,12 +93,32 @@ When adding bar charts (e.g. spending over time), follow these rules:
 - Hover/tooltip: not needed for MVP — use legend for details
 - Animate on first render: optional, via `requestAnimationFrame` with eased progress (0→1 over ~400ms)
 
+### Implemented bar chart helpers (app.js)
+
+**`drawBarChart(canvas, bars, currency)`** — vertical bar chart (spending over time)
+
+- Canvas: **500×200** logical px
+- `bars`: `[{ label: string, amount: number }]` — one entry per day, sorted chronologically
+- X-axis labels: locale-aware `MM/DD` or `DD/MM` via `formatShortDate(isoDate)`
+- Bars colored `PIE_COLORS[0]` (amber); paddings: top 16px, bottom 36px, left/right 12px each
+
+**`drawHorizontalBarChart(canvas, bars, currency)`** — horizontal bar chart (spending by member)
+
+- Canvas: **400 × (n × 40 + 40)** logical px, where n = number of bars
+- `bars`: `[{ name: string, amount: number, color?: string }]` — sorted descending by amount, zero-amount entries filtered
+- Each member uses `PIE_COLORS[i % PIE_COLORS.length]`; `color` property validated against `/^#[0-9a-fA-F]{3,8}$/`
+- Name column: 90px (truncated with `…` if overflow); amount column: 80px right-aligned
+
+**`formatShortDate(isoDate)`** — converts `'YYYY-MM-DD'` to `'MM/DD'` or `'DD/MM'` based on `navigator.language`; returns raw string for malformed input
+
+**`sanitizeFilename(name)`** — strips non-alphanumeric chars for use in download filenames
+
 ## Data Preparation
 
 - Sort slices/bars by **amount descending** (largest first) unless temporal (dates → chronological)
 - Filter out zero-amount entries before rendering
 - Always compute `total` from the filtered data, not from raw input
-- For date-based charts, group by ISO date string (`YYYY-MM-DD`) and sort chronologically
+- For date-based charts, group by ISO date string (`YYYY-MM-DD`) and sort chronologically — ISO format ensures correct lexicographic (string) ordering
 
 ## Layout in HTML
 
@@ -139,7 +159,11 @@ function exportCanvasPng(canvas, filename) {
   link.href = canvas.toDataURL('image/png');
   link.click();
 }
+
+function sanitizeFilename(name) {
+  return (name || 'trip').replace(/[^a-z0-9-]+/gi, '-').toLowerCase().replace(/^-|-$/g, '');
+}
 ```
 
 - Use descriptive filenames: `banana-splitt-{tripName}-{chartType}.png`
-- Sanitize trip name for filename (remove special chars)
+- Sanitize trip name for filename (remove special chars) using `sanitizeFilename()`
