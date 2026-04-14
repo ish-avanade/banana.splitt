@@ -891,12 +891,106 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
         toast('Expense added 💸', 'success');
       }
       closeModal();
-      onSuccess();
+      await checkAndUpdateTripDates(trip, date, expense?.id, onSuccess);
     } catch (err) {
       toast(err.message, 'error');
     }
   });
 }
+
+/**
+ * Show a styled confirmation modal asking whether to update a trip date boundary.
+ * Resolves true (update) or false (keep current) regardless of how the modal is closed.
+ */
+function dateUpdatePrompt(label, current, proposed) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      closeModal();
+      resolve(val);
+    };
+
+    const labelCap   = label === 'start' ? 'Start' : 'End';
+    const direction  = label === 'start' ? 'before' : 'after';
+
+    openModal(`
+      <h2 class="modal-title">Update Trip ${escHtml(labelCap)} Date?</h2>
+      <p>This expense date (<strong>${escHtml(proposed)}</strong>) is
+      ${direction} the trip ${escHtml(label)} date
+      (<strong>${escHtml(current)}</strong>).</p>
+      <p style="margin-top:.5rem">Update the trip ${escHtml(label)} date to
+      <strong>${escHtml(proposed)}</strong>?</p>
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn btn-secondary" id="date-no-btn">Keep ${escHtml(current)}</button>
+        <button class="btn btn-primary" id="date-yes-btn">Update to ${escHtml(proposed)}</button>
+      </div>
+    `);
+
+    document.getElementById('date-no-btn').addEventListener('click', () => finish(false));
+    document.getElementById('date-yes-btn').addEventListener('click', () => finish(true));
+
+    // Resolve false if modal is closed via X button, Escape, or overlay click
+    const obs = new MutationObserver(() => {
+      if (overlay.classList.contains('hidden')) { obs.disconnect(); finish(false); }
+    });
+    obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+  });
+}
+
+/**
+ * After an expense is saved, check whether the trip's date range should be updated:
+ * - No dates set: silently auto-set start/end from all expense dates.
+ * - Expense predates startDate: prompt the user.
+ * - Expense postdates endDate: prompt the user.
+ * The expense is already saved regardless of the user's choice. onSuccess() is called at the end.
+ */
+async function checkAndUpdateTripDates(trip, expenseDate, editingExpenseId, onSuccess) {
+  if (!expenseDate) { onSuccess(); return; }
+
+  const noStart = !trip.startDate;
+  const noEnd   = !trip.endDate;
+
+  if (noStart && noEnd) {
+    // Auto-set trip dates silently from all expense dates (including the new/edited one)
+    const allDates = trip.expenses
+      .filter(e => e.id !== editingExpenseId)
+      .map(e => e.date)
+      .filter(Boolean);
+    allDates.push(expenseDate);
+    allDates.sort();
+    try {
+      await put(`/trips/${trip.id}`, {
+        startDate: allDates[0],
+        endDate:   allDates[allDates.length - 1],
+      });
+    } catch (_) { /* silently ignore — forecast is non-critical */ }
+    onSuccess();
+    return;
+  }
+
+  if (!noStart && expenseDate < trip.startDate) {
+    const ok = await dateUpdatePrompt('start', trip.startDate, expenseDate);
+    if (ok) {
+      try {
+        await put(`/trips/${trip.id}`, { startDate: expenseDate });
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  }
+
+  if (!noEnd && expenseDate > trip.endDate) {
+    const ok = await dateUpdatePrompt('end', trip.endDate, expenseDate);
+    if (ok) {
+      try {
+        await put(`/trips/${trip.id}`, { endDate: expenseDate });
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  }
+
+  onSuccess();
+}
+
 
 async function confirmDeleteExpense(trip, expense, onSuccess) {
   openModal(`
