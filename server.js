@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -241,7 +243,7 @@ app.post('/api/trips/:id/expenses', (req, res) => {
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
-  const { description, amount, paidBy, splitBetween, date } = req.body;
+  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
 
   if (!description || typeof description !== 'string' || !description.trim()) {
     return res.status(400).json({ error: 'Expense description is required' });
@@ -269,6 +271,13 @@ app.post('/api/trips/:id/expenses', (req, res) => {
     date: date || new Date().toISOString().split('T')[0],
     createdAt: new Date().toISOString(),
   };
+  if (category !== undefined) expense.category = String(category).trim();
+
+  if (originalCurrency && originalCurrency !== trip.currency) {
+    expense.originalCurrency = originalCurrency;
+    expense.originalAmount = typeof originalAmount === 'number' ? originalAmount : amount;
+    expense.convertedAmount = typeof convertedAmount === 'number' ? convertedAmount : amount;
+  }
   trip.expenses.push(expense);
   saveData(data);
   res.status(201).json(expense);
@@ -282,7 +291,7 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
   const expense = trip.expenses.find((e) => e.id === req.params.eid);
   if (!expense) return res.status(404).json({ error: 'Expense not found' });
 
-  const { description, amount, paidBy, splitBetween, date } = req.body;
+  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
   if (description !== undefined) expense.description = description.trim();
   if (amount !== undefined) {
     if (typeof amount !== 'number' || amount <= 0) {
@@ -307,6 +316,20 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
     expense.splitBetween = splitBetween;
   }
   if (date !== undefined) expense.date = date;
+  if (category !== undefined) expense.category = String(category).trim();
+
+  if (originalCurrency !== undefined) {
+    if (originalCurrency && originalCurrency !== trip.currency) {
+      expense.originalCurrency = originalCurrency;
+      if (typeof originalAmount === 'number') expense.originalAmount = originalAmount;
+      if (typeof convertedAmount === 'number') expense.convertedAmount = convertedAmount;
+    } else {
+      // Currency changed back to trip currency — clear conversion fields
+      delete expense.originalCurrency;
+      delete expense.originalAmount;
+      delete expense.convertedAmount;
+    }
+  }
 
   saveData(data);
   res.json(expense);
@@ -333,6 +356,199 @@ app.get('/api/trips/:id/balances', (req, res) => {
   const trip = data.trips.find((t) => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   res.json(calculateBalances(trip));
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — AI Parse Expense
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// AI provider helpers
+// ---------------------------------------------------------------------------
+
+function isAiConfigured() {
+  return !!(process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_DEPLOYMENT)
+    || !!process.env.OPENAI_API_KEY;
+}
+
+function buildAiRequest(systemPrompt, userMessage) {
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+
+  // Azure OpenAI
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_DEPLOYMENT) {
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT.replace(/\/$/, '');
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview';
+    return {
+      url: `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`,
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': process.env.AZURE_OPENAI_API_KEY,
+      },
+      body: JSON.stringify({ messages, temperature: 0 }),
+    };
+  }
+
+  // Direct OpenAI
+  return {
+    url: 'https://api.openai.com/v1/chat/completions',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages,
+      temperature: 0,
+    }),
+  };
+}
+
+// Report whether the AI feature is available
+app.get('/api/ai-enabled', (req, res) => {
+  res.json({ enabled: isAiConfigured() || !!process.env.MOCK_AI_RESPONSE });
+});
+
+// Parse a natural-language message into structured expense(s)
+app.post('/api/trips/:id/parse-expense', async (req, res) => {
+  const data = loadData();
+  const trip = data.trips.find((t) => t.id === req.params.id);
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+  const { message } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+  if (message.length > 500) {
+    return res.status(400).json({ error: 'message must be 500 characters or fewer' });
+  }
+
+  if (!isAiConfigured() && !process.env.MOCK_AI_RESPONSE) {
+    return res.status(503).json({ error: 'AI parsing is not configured. Set AZURE_OPENAI_* or OPENAI_API_KEY env vars.' });
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  // Build participant name list used in the prompt (may be empty on a brand-new trip)
+  const participantNames = trip.participants.map((p) => p.name).join(', ');
+
+  // Default date: most recent valid expense date, or today if none exist
+  const lastExpenseDate = (trip.expenses || []).reduce((latest, expense) => {
+    const expenseDate =
+      typeof expense?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expense.date)
+        ? expense.date
+        : null;
+    if (!expenseDate) return latest;
+    if (!latest || expenseDate > latest) return expenseDate;
+    return latest;
+  }, null) || today;
+  const systemPrompt =
+    `You are a cost-splitting assistant. Extract expense information from the user's message.\n` +
+    `Trip context:\n` +
+    `- Participants: ${participantNames || 'none yet'}\n` +
+    `- Trip currency: ${trip.currency}\n` +
+    `- Default date (if not specified): ${lastExpenseDate}\n\n` +
+    `Return ONLY a JSON array of expense objects. Each object must have:\n` +
+    `- description: string (what was bought/paid for)\n` +
+    `- amount: number (positive, no currency symbols)\n` +
+    `- paidBy: string (name of who paid — may be a new person not in the participants list)\n` +
+    `- splitBetween: array of strings (participant names sharing this expense${participantNames ? `; if not specified use ALL participants: ${participantNames}` : ''})\n` +
+    `- date: string (YYYY-MM-DD; use the default date above if not specified)\n` +
+    `- currency: string (ISO currency code — interpret written names: "euros"→EUR, "dollars"→USD, "pounds"→GBP, "yen"→JPY, "rupees"→INR; default to ${trip.currency} if not mentioned)\n\n` +
+    `Rules:\n` +
+    `- The payer may be someone not yet in the participants list — include their name anyway.\n` +
+    `- Only return [] if the message is clearly not an expense (e.g. a greeting). If you can extract a description and amount, return a result using reasonable defaults.\n` +
+    `Return only the JSON array, no other text, no markdown fences.`;
+
+  try {
+    let rawContent;
+    if (process.env.MOCK_AI_RESPONSE) {
+      rawContent = process.env.MOCK_AI_RESPONSE;
+    } else {
+      const aiReq = buildAiRequest(systemPrompt, message.trim());
+      const aiRes = await fetch(aiReq.url, {
+        method: 'POST',
+        headers: aiReq.headers,
+        body: aiReq.body,
+      });
+
+      if (!aiRes.ok) {
+        const errBody = await aiRes.json().catch(() => ({}));
+        return res.status(502).json({ error: errBody.error?.message || 'AI service error' });
+      }
+
+      const aiData = await aiRes.json();
+      rawContent = aiData.choices?.[0]?.message?.content || '[]';
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      return res.status(422).json({ error: 'AI returned unparseable response', raw: rawContent });
+    }
+
+    if (!Array.isArray(parsed)) {
+      return res.status(422).json({ error: 'AI returned unexpected format' });
+    }
+
+    // Map participant names to IDs (case-insensitive fuzzy match), auto-creating if not found.
+    // `participantsChanged` is local to this request handler invocation (per-request scope).
+    let participantsChanged = false;
+
+    function findParticipant(name) {
+      const lower = (name || '').toLowerCase().trim();
+      return (
+        trip.participants.find((p) => p.name.toLowerCase() === lower) ||
+        trip.participants.find((p) => p.name.toLowerCase().startsWith(lower)) ||
+        trip.participants.find((p) => lower.startsWith(p.name.toLowerCase())) ||
+        null
+      );
+    }
+
+    function findOrCreateParticipant(name) {
+      const trimmed = (name || '').trim();
+      if (!trimmed) return null;
+      const existing = findParticipant(trimmed);
+      if (existing) return existing;
+      const newParticipant = { id: uuidv4(), name: trimmed };
+      trip.participants.push(newParticipant);
+      participantsChanged = true;
+      return newParticipant;
+    }
+
+    const expenses = parsed.map((item) => {
+      const payer = findOrCreateParticipant(item.paidBy);
+      // Default to ALL current participants (including any newly created payer) when omitted
+      const splitParticipants = (Array.isArray(item.splitBetween) && item.splitBetween.length > 0)
+        ? item.splitBetween.map(findOrCreateParticipant).filter(Boolean)
+        : trip.participants.slice();
+      // Normalize and validate currency; fall back to trip currency if invalid
+      const rawCurrency = (item.currency || '').trim().toUpperCase();
+      const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : trip.currency;
+      return {
+        description: String(item.description || '').trim(),
+        amount: Number(item.amount) || 0,
+        paidBy: payer ? payer.id : null,
+        paidByName: payer ? payer.name : (item.paidBy || null),
+        splitBetween: splitParticipants.map((p) => p.id),
+        splitBetweenNames: splitParticipants.map((p) => p.name),
+        date: item.date || lastExpenseDate,
+        currency,
+      };
+    });
+
+    if (participantsChanged) {
+      saveData(data);
+    }
+
+    res.json({ expenses });
+  } catch (err) {
+    console.error('AI parse-expense error:', err);
+    res.status(502).json({ error: 'Failed to reach AI service' });
+  }
 });
 
 // ---------------------------------------------------------------------------

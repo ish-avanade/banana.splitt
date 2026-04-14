@@ -141,6 +141,35 @@ function avatarStyle(name) {
 }
 
 // ---------------------------------------------------------------------------
+// Expense categorizer
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = [
+  { name: 'Food & Drink',  icon: '🍽️', color: '#F97316', keywords: ['dinner','lunch','breakfast','restaurant','cafe','coffee','bar','beer','wine','groceries','food','pizza','sushi','burger','snack','drink','brunch','bakery','meal','drinks','takeaway','takeout'] },
+  { name: 'Transport',     icon: '🚗', color: '#3B82F6', keywords: ['taxi','uber','lyft','bus','train','metro','flight','gas','parking','car','fuel','subway','tram','ferry','bike','scooter','transport','transit','toll','rental','airport'] },
+  { name: 'Accommodation', icon: '🏨', color: '#8B5CF6', keywords: ['hotel','hostel','airbnb','accommodation','motel','resort','apartment','lodge','inn','stay','room','villa'] },
+  { name: 'Activities',    icon: '🎯', color: '#10B981', keywords: ['tour','ticket','museum','concert','show','activity','sport','game','park','attraction','event','festival','class','lesson','excursion','entrance','adventure','theatre','theater','cinema','movie'] },
+  { name: 'Shopping',      icon: '🛍️', color: '#EC4899', keywords: ['shopping','shop','store','market','mall','souvenir','clothes','clothing','gift','buy','purchase','supermarket'] },
+  { name: 'Other',         icon: '📦', color: '#9CA3AF', keywords: [] },
+];
+
+function categorize(description) {
+  const lower = (description || '').toLowerCase();
+  for (const cat of CATEGORIES) {
+    if (cat.keywords.some((kw) => lower.includes(kw))) return cat.name;
+  }
+  return 'Other';
+}
+
+function categoryIcon(name) {
+  return CATEGORIES.find((c) => c.name === name)?.icon || '📦';
+}
+
+function categoryColor(name) {
+  return CATEGORIES.find((c) => c.name === name)?.color || '#9CA3AF';
+}
+
+// ---------------------------------------------------------------------------
 // HOME PAGE
 // ---------------------------------------------------------------------------
 
@@ -306,10 +335,16 @@ async function renderTripDetail(tripId) {
       shareBalancesSummary(tripId, trip)
     );
 
+    // Generate summary button
+    main.querySelector('#btn-generate-summary').addEventListener('click', () =>
+      shareTripSummary(tripId, trip)
+    );
+
     renderExpensesTab(trip, tripId);
     renderMembersTab(trip, tripId);
     renderDashboard(trip);
-    await renderBalancesTab(tripId, trip.currency);
+    await renderBalancesTab(tripId, trip.currency, trip);
+    await initAiChat(trip, tripId);
   } catch (err) {
     toast(err.message, 'error');
     navigate('');
@@ -348,10 +383,18 @@ function renderExpensesTab(trip, tripId) {
       .map((id) => trip.participants.find((p) => p.id === id)?.name || '?')
       .join(', ');
 
+    const catName = expense.category || categorize(expense.description);
     const item = document.createElement('div');
     item.className = 'expense-item';
+
+    // Determine whether to show dual-currency display safely via DOM (not innerHTML)
+    const showConversion = expense.originalCurrency
+      && expense.originalCurrency !== trip.currency
+      && typeof expense.originalAmount === 'number';
+
+    // Use a placeholder token that we'll replace via DOM after setting innerHTML
     item.innerHTML = `
-      <div class="expense-icon">💸</div>
+      <div class="expense-icon">${categoryIcon(catName)}</div>
       <div class="expense-body">
         <div class="expense-desc">${escHtml(expense.description)}</div>
         <div class="expense-meta">
@@ -360,12 +403,29 @@ function renderExpensesTab(trip, tripId) {
           · <time>${expense.date}</time>
         </div>
       </div>
-      <div class="expense-amount">${fmt(expense.amount, trip.currency)}</div>
+      <div class="expense-amount"></div>
       <div class="expense-actions">
         <button class="btn btn-ghost btn-sm edit-expense-btn" aria-label="Edit expense" title="Edit">✏️</button>
         <button class="btn btn-ghost btn-sm delete-expense-btn" aria-label="Delete expense" title="Delete">🗑️</button>
       </div>
     `;
+
+    // Populate amount cell with safe DOM nodes to avoid Intl.NumberFormat throws and XSS
+    const amountCell = item.querySelector('.expense-amount');
+    if (showConversion) {
+      let origText, convText;
+      try { origText = fmt(expense.originalAmount, expense.originalCurrency); } catch { origText = String(expense.originalAmount); }
+      try { convText = fmt(expense.amount, trip.currency); } catch { convText = String(expense.amount); }
+      amountCell.appendChild(document.createTextNode(origText));
+      const note = document.createElement('span');
+      note.className = 'conversion-note';
+      note.textContent = `(≈ ${convText})`;
+      amountCell.appendChild(note);
+    } else {
+      let mainText;
+      try { mainText = fmt(expense.amount, trip.currency); } catch { mainText = String(expense.amount); }
+      amountCell.textContent = mainText;
+    }
     item.querySelector('.edit-expense-btn').addEventListener('click', () =>
       showEditExpenseModal(trip, expense, () => renderTripDetail(tripId))
     );
@@ -411,8 +471,50 @@ function renderDashboard(trip) {
   }
   chartSection.classList.remove('hidden');
 
-  drawPieChart(document.getElementById('pie-chart'), slices, trip.currency);
-  renderChartLegend(document.getElementById('chart-legend'), slices, total, trip.currency);
+  const canvas     = document.getElementById('pie-chart');
+  const legendEl   = document.getElementById('chart-legend');
+  const togglePayer = document.getElementById('chart-toggle-payer');
+  const toggleCat   = document.getElementById('chart-toggle-category');
+
+  function showPayerChart() {
+    togglePayer.classList.add('active');
+    toggleCat.classList.remove('active');
+    drawPieChart(canvas, slices, trip.currency);
+    renderChartLegend(legendEl, slices, total, trip.currency);
+  }
+
+  function showCategoryChart() {
+    togglePayer.classList.remove('active');
+    toggleCat.classList.add('active');
+    renderCategoryChart(canvas, legendEl, trip);
+  }
+
+  togglePayer.addEventListener('click', showPayerChart);
+  toggleCat.addEventListener('click', showCategoryChart);
+
+  showPayerChart();
+}
+
+function renderCategoryChart(canvas, legendContainer, trip) {
+  const total = trip.expenses.reduce((s, e) => s + e.amount, 0);
+
+  const byCategory = {};
+  for (const e of trip.expenses) {
+    const catName = e.category || categorize(e.description);
+    byCategory[catName] = (byCategory[catName] || 0) + e.amount;
+  }
+
+  const slices = CATEGORIES
+    .filter((cat) => byCategory[cat.name] > 0)
+    .map((cat) => ({
+      name: `${cat.icon} ${cat.name}`,
+      amount: byCategory[cat.name],
+      color: cat.color,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  drawPieChart(canvas, slices, trip.currency);
+  renderChartLegend(legendContainer, slices, total, trip.currency);
 }
 
 function drawPieChart(canvas, slices, currency) {
@@ -440,7 +542,7 @@ function drawPieChart(canvas, slices, currency) {
     ctx.arc(cx, cy, radius, startAngle, endAngle);
     ctx.arc(cx, cy, innerRadius, endAngle, startAngle, true);
     ctx.closePath();
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+    ctx.fillStyle = slice.color || PIE_COLORS[i % PIE_COLORS.length];
     ctx.fill();
 
     // Subtle separator
@@ -465,10 +567,11 @@ function renderChartLegend(container, slices, total, currency) {
   container.innerHTML = '';
   slices.forEach((slice, i) => {
     const pct = ((slice.amount / total) * 100).toFixed(1);
+    const color = slice.color || PIE_COLORS[i % PIE_COLORS.length];
     const div = document.createElement('div');
     div.className = 'legend-item';
     div.innerHTML = `
-      <span class="legend-dot" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>
+      <span class="legend-dot" style="background:${color}"></span>
       <span class="legend-name">${escHtml(slice.name)}</span>
       <span class="legend-value">${fmt(slice.amount, currency)}</span>
       <span class="legend-pct">${pct}%</span>
@@ -479,7 +582,7 @@ function renderChartLegend(container, slices, total, currency) {
 
 // ---- Balances tab ----
 
-async function renderBalancesTab(tripId, currency) {
+async function renderBalancesTab(tripId, currency, trip) {
   try {
     const { balances, settlements } = await get(`/trips/${tripId}/balances`);
     const balList = document.getElementById('balances-list');
@@ -518,7 +621,11 @@ async function renderBalancesTab(tripId, currency) {
           <span class="settlement-arrow">→</span>
           to
           <span class="settlement-to">${escHtml(s.toName)}</span>
+          <button class="btn btn-ghost btn-sm settlement-remind-btn" title="Send payment reminder">📩 Remind</button>
         `;
+        div.querySelector('.settlement-remind-btn').addEventListener('click', () =>
+          showReminderModal(trip, s, currency)
+        );
         setList.appendChild(div);
       }
     }
@@ -567,6 +674,152 @@ async function shareBalancesSummary(tripId, trip) {
   }
 }
 
+// ---- Payment reminder modal ----
+
+function showReminderModal(trip, settlement, currency) {
+  const message = `Hey ${settlement.fromName}! 👋 Quick reminder from our ${trip.name} trip — you owe ${settlement.toName} ${fmt(settlement.amount, currency)}. No rush, just keeping track with banana/splitt 🍌`;
+
+  openModal(`
+    <h2 class="modal-title">📩 Payment Reminder</h2>
+    <p class="reminder-subtitle">Edit the message below before sending.</p>
+    <div class="form-group">
+      <textarea id="reminder-message" class="reminder-textarea" rows="5"></textarea>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" id="reminder-cancel">Cancel</button>
+      ${navigator.share ? `<button type="button" class="btn btn-secondary" id="reminder-share">📤 Share</button>` : ''}
+      <button type="button" class="btn btn-primary" id="reminder-copy">📋 Copy</button>
+    </div>
+  `);
+
+  document.getElementById('reminder-message').value = message;
+  document.getElementById('reminder-cancel').addEventListener('click', closeModal);
+
+  document.getElementById('reminder-copy').addEventListener('click', async () => {
+    const text = document.getElementById('reminder-message').value;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Message copied to clipboard!', 'success');
+      closeModal();
+    } catch {
+      toast('Could not copy to clipboard.', 'error');
+    }
+  });
+
+  if (navigator.share) {
+    document.getElementById('reminder-share').addEventListener('click', async () => {
+      const text = document.getElementById('reminder-message').value;
+      try {
+        await navigator.share({ title: `Payment reminder — ${trip.name}`, text });
+      } catch (err) {
+        if (err.name !== 'AbortError') toast(err.message, 'error');
+      }
+    });
+  }
+}
+
+// ---- Narrative trip summary ----
+
+function generateTripSummary(trip, balances, settlements) {
+  const total = trip.expenses.reduce((s, e) => s + e.amount, 0);
+  const count = trip.expenses.length;
+  const memberCount = trip.participants.length;
+
+  // Top payer by amount paid
+  const paidByPerson = {};
+  for (const e of trip.expenses) {
+    if (!paidByPerson[e.paidBy]) {
+      const p = trip.participants.find((p) => p.id === e.paidBy);
+      paidByPerson[e.paidBy] = { name: p ? p.name : '?', amount: 0 };
+    }
+    paidByPerson[e.paidBy].amount += e.amount;
+  }
+  const topPayer = Object.values(paidByPerson).sort((a, b) => b.amount - a.amount)[0];
+
+  // Biggest single expense
+  const biggest = count > 0
+    ? trip.expenses.reduce((max, e) => (e.amount > max.amount ? e : max), trip.expenses[0])
+    : null;
+
+  // Top category (if any expenses have a category field)
+  const hasCats = trip.expenses.some((e) => e.category);
+  let topCatLine = '';
+  if (hasCats) {
+    const catTotals = {};
+    for (const e of trip.expenses) {
+      const cat = e.category || 'Other';
+      catTotals[cat] = (catTotals[cat] || 0) + e.amount;
+    }
+    const topCat = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
+    if (topCat) {
+      const pct = total > 0 ? Math.round((topCat[1] / total) * 100) : 0;
+      topCatLine = ` ${topCat[0]} was the biggest category at ${pct}% (${fmt(topCat[1], trip.currency)}).`;
+    }
+  }
+
+  // Date range
+  let dateLine = '';
+  if (count > 0) {
+    const dates = trip.expenses.map((e) => e.date).sort();
+    if (dates[0] === dates[dates.length - 1]) {
+      dateLine = ` on ${dates[0]}`;
+    } else {
+      dateLine = ` from ${dates[0]} to ${dates[dates.length - 1]}`;
+    }
+  }
+
+  let text = `🍌 ${trip.name} Summary\n`;
+  text += '━'.repeat(30) + '\n\n';
+
+  if (count === 0) {
+    text += `No expenses recorded yet for this trip.`;
+    return text;
+  }
+
+  text += `The group spent ${fmt(total, trip.currency)} across ${count} expense${count !== 1 ? 's' : ''} with ${memberCount} member${memberCount !== 1 ? 's' : ''}${dateLine}.`;
+
+  if (topPayer && topPayer.amount > 0) {
+    text += ` ${topPayer.name} covered the most (${fmt(topPayer.amount, trip.currency)}).`;
+  }
+
+  if (biggest) {
+    text += ` The biggest single expense was "${biggest.description}" at ${fmt(biggest.amount, trip.currency)}.`;
+  }
+
+  if (topCatLine) text += topCatLine;
+
+  text += '\n\n';
+
+  if (settlements.length > 0) {
+    text += '💸 To settle up:\n';
+    for (const s of settlements) {
+      text += `  ${s.fromName} pays ${fmt(s.amount, trip.currency)} to ${s.toName}\n`;
+    }
+  } else {
+    text += '🎉 All settled up! No payments needed.';
+  }
+
+  return text;
+}
+
+async function shareTripSummary(tripId, trip) {
+  try {
+    const { balances, settlements } = await get(`/trips/${tripId}/balances`);
+    const text = generateTripSummary(trip, balances, settlements);
+
+    if (navigator.share) {
+      await navigator.share({ title: `🍌 ${trip.name} Summary`, text });
+    } else {
+      await navigator.clipboard.writeText(text);
+      toast('Trip summary copied to clipboard!', 'success');
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      toast(err.message, 'error');
+    }
+  }
+}
+
 // ---- Members tab ----
 
 function renderMembersTab(trip, tripId) {
@@ -601,11 +854,19 @@ function renderMembersTab(trip, tripId) {
 // MODALS — Add / Edit Expense
 // ---------------------------------------------------------------------------
 
-function expenseModalHTML(trip, expense) {
+function expenseModalHTML(trip, expense, prefill = null) {
   const participants = trip.participants;
   const today = new Date().toISOString().split('T')[0];
 
-  const splitIds = expense?.splitBetween || participants.map((p) => p.id);
+  // `vals` provides default values: editing an existing expense takes priority,
+  // then AI-prefilled data, then blank.
+  const vals = expense || prefill;
+  const splitIds = vals?.splitBetween || participants.map((p) => p.id);
+
+  // When editing, show original amount if a foreign currency was used
+  const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : (vals?.amount || ''));
+  const expCurrency = expense?.originalCurrency || trip.currency;
+  const currentCat = expense?.category || categorize(vals?.description || '');
 
   return `
     <h2 class="modal-title">${expense ? 'Edit Expense' : 'Add Expense'}</h2>
@@ -613,22 +874,36 @@ function expenseModalHTML(trip, expense) {
       <div class="form-group">
         <label for="exp-desc">Description *</label>
         <input id="exp-desc" type="text" placeholder="e.g. Hotel, Dinner, Taxi…"
-          value="${escAttr(expense?.description || '')}" required maxlength="120" />
+          value="${escAttr(vals?.description || '')}" required maxlength="120" />
       </div>
       <div class="form-group">
-        <label for="exp-amount">Amount (${escHtml(trip.currency)}) *</label>
-        <input id="exp-amount" type="number" step="0.01" min="0.01"
-          value="${expense ? expense.amount : ''}" required placeholder="0.00" />
+        <label for="exp-amount">Amount *</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input id="exp-amount" type="number" step="0.01" min="0.01"
+            value="${escAttr(String(displayAmount))}" required placeholder="0.00" style="flex:1" />
+          <select id="exp-currency" style="width:7rem">
+            ${CURRENCIES.map((c) =>
+              `<option value="${c.code}"${c.code === expCurrency ? ' selected' : ''}>${c.code}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div id="conversion-preview" style="font-size:.8rem;color:var(--text-muted);margin-top:.25rem;min-height:1.2em"></div>
+      </div>
+      <div class="form-group">
+        <label for="exp-category">Category</label>
+        <select id="exp-category">
+          ${CATEGORIES.map((c) => `<option value="${escAttr(c.name)}"${currentCat === c.name ? ' selected' : ''}>${c.icon} ${escHtml(c.name)}</option>`).join('')}
+        </select>
       </div>
       <div class="form-group">
         <label for="exp-date">Date</label>
-        <input id="exp-date" type="date" value="${expense?.date || today}" />
+        <input id="exp-date" type="date" value="${vals?.date || today}" />
       </div>
       <div class="form-group">
         <label for="exp-paidby">Paid by *</label>
         <select id="exp-paidby">
           ${participants.map((p) =>
-            `<option value="${p.id}" ${expense?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
+            `<option value="${p.id}" ${vals?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
           ).join('')}
         </select>
       </div>
@@ -658,12 +933,12 @@ function expenseModalHTML(trip, expense) {
   `;
 }
 
-function showAddExpenseModal(trip, onSuccess) {
+function showAddExpenseModal(trip, onSuccess, prefill = null) {
   if (trip.participants.length === 0) {
     toast('Add members to the trip before adding expenses.', 'error');
     return;
   }
-  openModal(expenseModalHTML(trip));
+  openModal(expenseModalHTML(trip, null, prefill));
   attachExpenseFormHandlers(trip, null, onSuccess);
 }
 
@@ -679,6 +954,69 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       cb.checked = true;
     });
   });
+
+  // Auto-categorize when description changes (only for new expenses)
+  if (!expense) {
+    document.getElementById('exp-desc').addEventListener('input', () => {
+      const desc = document.getElementById('exp-desc').value.trim();
+      document.getElementById('exp-category').value = categorize(desc);
+    });
+  }
+
+  // Live conversion preview
+  let conversionRate = null;
+  let lastConvertedAmount = null;
+  let conversionTimeout = null;
+
+  async function updateConversionPreview() {
+    const amountVal = parseFloat(document.getElementById('exp-amount').value);
+    const expCurrency = document.getElementById('exp-currency').value;
+    const dateVal = document.getElementById('exp-date').value;
+    const preview = document.getElementById('conversion-preview');
+
+    if (expCurrency === trip.currency || !amountVal || amountVal <= 0) {
+      preview.textContent = '';
+      conversionRate = null;
+      lastConvertedAmount = null;
+      return;
+    }
+
+    preview.textContent = 'Fetching rate…';
+    try {
+      const date = dateVal || new Date().toISOString().split('T')[0];
+      const url = `https://api.frankfurter.dev/v1/${date}?from=${expCurrency}&to=${trip.currency}&amount=${amountVal}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Rate unavailable');
+      const data = await res.json();
+      const converted = data.rates[trip.currency];
+      if (typeof converted !== 'number') throw new Error('Rate unavailable');
+      conversionRate = converted / amountVal;
+      lastConvertedAmount = Math.round(converted * 100) / 100;
+      preview.textContent = `≈ ${fmt(lastConvertedAmount, trip.currency)} at ${conversionRate.toFixed(4)} rate`;
+    } catch {
+      conversionRate = null;
+      lastConvertedAmount = null;
+      preview.textContent = 'Could not fetch rate — will use 1:1';
+    }
+  }
+
+  function schedulePreviewUpdate() {
+    clearTimeout(conversionTimeout);
+    conversionTimeout = setTimeout(updateConversionPreview, 500);
+  }
+
+  document.getElementById('exp-amount').addEventListener('input', schedulePreviewUpdate);
+  document.getElementById('exp-currency').addEventListener('change', updateConversionPreview);
+  document.getElementById('exp-date').addEventListener('change', updateConversionPreview);
+
+  // Show initial preview if editing a foreign-currency expense
+  if (expense?.originalCurrency && expense.originalCurrency !== trip.currency) {
+    const preview = document.getElementById('conversion-preview');
+    const rate = expense.originalAmount > 0
+      ? (expense.convertedAmount / expense.originalAmount).toFixed(4)
+      : '1.0000';
+    preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
+  }
 
   // Duplicate & anomaly detection — cache stable DOM refs once
   const amountEl      = document.getElementById('exp-amount');
@@ -743,9 +1081,11 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const description = document.getElementById('exp-desc').value.trim();
-    const amount      = parseFloat(document.getElementById('exp-amount').value);
     const date        = document.getElementById('exp-date').value;
     const paidBy      = document.getElementById('exp-paidby').value;
+    const expCurrency = document.getElementById('exp-currency').value;
+    const rawAmount   = parseFloat(document.getElementById('exp-amount').value);
+    const category    = document.getElementById('exp-category').value;
     const splitBetween = [...document.querySelectorAll('#split-checkboxes input:checked')]
       .map((cb) => cb.value);
 
@@ -754,15 +1094,53 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
+    // Determine final amount in trip currency and optional conversion fields
+    let amount = rawAmount;
+    let extraFields = {};
+
+    if (expCurrency !== trip.currency) {
+      if (conversionRate !== null) {
+        // Use lastConvertedAmount when amount matches the preview, else reapply rate
+        const previewAmount = parseFloat(document.getElementById('exp-amount').value);
+        amount = lastConvertedAmount !== null && previewAmount === rawAmount
+          ? lastConvertedAmount
+          : Math.round(rawAmount * conversionRate * 100) / 100;
+      } else {
+        // Fallback: try one more fetch; if fails, use 1:1
+        try {
+          const date2 = date || new Date().toISOString().split('T')[0];
+          const url = `https://api.frankfurter.dev/v1/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('rate fetch failed');
+          const data = await res.json();
+          const converted = data.rates?.[trip.currency];
+          if (typeof converted !== 'number') throw new Error('rate missing');
+          amount = Math.round(converted * 100) / 100;
+        } catch {
+          toast('Exchange rate unavailable — using 1:1 conversion', 'error');
+        }
+      }
+      extraFields = {
+        originalCurrency: expCurrency,
+        originalAmount: rawAmount,
+        convertedAmount: amount,
+      };
+    } else {
+      // Same currency — clear any previous conversion data when editing
+      if (expense?.originalCurrency) {
+        extraFields = { originalCurrency: trip.currency };
+      }
+    }
+
     try {
       if (expense) {
         await put(`/trips/${trip.id}/expenses/${expense.id}`, {
-          description, amount, date, paidBy, splitBetween,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense updated', 'success');
       } else {
         await post(`/trips/${trip.id}/expenses`, {
-          description, amount, date, paidBy, splitBetween,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense added 💸', 'success');
       }
@@ -852,6 +1230,152 @@ async function confirmRemoveMember(trip, participant, onSuccess) {
       toast(err.message, 'error');
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// AI CHAT — Natural language expense entry
+// ---------------------------------------------------------------------------
+
+async function initAiChat(trip, tripId) {
+  const chatBar = document.getElementById('ai-chat-bar');
+  if (!chatBar) return;
+
+  try {
+    const { enabled } = await get('/ai-enabled');
+    if (!enabled) return;
+  } catch {
+    return;
+  }
+
+  chatBar.classList.remove('hidden');
+
+  const form    = document.getElementById('ai-chat-form');
+  const input   = document.getElementById('ai-chat-input');
+  const results = document.getElementById('ai-parsed-results');
+  const sendBtn = form.querySelector('.ai-chat-send');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+    results.innerHTML = '';
+
+    try {
+      const { expenses } = await post(`/trips/${tripId}/parse-expense`, { message });
+
+      if (!expenses || expenses.length === 0) {
+        toast('Could not parse any expenses. Try being more specific or use the form.', 'error');
+        return;
+      }
+
+      input.value = '';
+      for (const expense of expenses) {
+        results.appendChild(renderAiExpenseCard(trip, expense, tripId));
+      }
+    } catch {
+      toast('Could not parse the message — try the form instead.', 'error');
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  });
+}
+
+function renderAiExpenseCard(trip, parsed, tripId) {
+  const card = document.createElement('div');
+  card.className = 'ai-expense-card';
+
+  const payerName      = parsed.paidByName || '?';
+  const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
+  // Validate parsed currency (must be a 3-letter ISO code present in the known list); fall back to trip currency
+  const parsedCurrency = (parsed.currency && /^[A-Z]{3}$/.test(parsed.currency)) ? parsed.currency : null;
+  const displayCurrency = parsedCurrency || trip.currency;
+  const currencyMismatch = parsedCurrency && parsedCurrency !== trip.currency;
+
+  card.innerHTML = `
+    <div class="ai-expense-card-body">
+      <div class="ai-expense-card-desc">${escHtml(parsed.description || 'Untitled')}</div>
+      <div class="ai-expense-card-meta">
+        Paid by <strong>${escHtml(payerName)}</strong>
+        · Split: ${escHtml(splitNames)}
+        · <time>${escHtml(parsed.date || '')}</time>
+        ${currencyMismatch ? `· <span class="ai-currency-warning">⚠ Currency: ${escHtml(parsed.currency)} (trip uses ${escHtml(trip.currency)})</span>` : ''}
+      </div>
+    </div>
+    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, displayCurrency)}</div>
+    <div class="ai-expense-card-actions">
+      <button class="btn btn-primary btn-sm ai-add-btn">Add</button>
+      <button class="btn btn-secondary btn-sm ai-edit-btn">Edit</button>
+      <button class="btn btn-ghost btn-sm ai-dismiss-btn" aria-label="Dismiss">✕</button>
+    </div>
+  `;
+
+  card.querySelector('.ai-add-btn').addEventListener('click', async () => {
+    if (!parsed.paidBy || !parsed.splitBetween?.length) {
+      toast('Could not match all participant names — use Edit to fill in manually.', 'error');
+      return;
+    }
+    const btn = card.querySelector('.ai-add-btn');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      let amount = parsed.amount;
+      const extraFields = {};
+
+      if (currencyMismatch) {
+        const date = parsed.date || new Date().toISOString().split('T')[0];
+        const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
+        convUrl.searchParams.set('from', parsedCurrency);
+        convUrl.searchParams.set('to', trip.currency);
+        convUrl.searchParams.set('amount', String(parsed.amount));
+        const convRes = await fetch(convUrl);
+        if (!convRes.ok) throw new Error('Could not fetch currency conversion');
+        const convData = await convRes.json();
+        const converted = convData.rates?.[trip.currency];
+        if (typeof converted !== 'number' || !Number.isFinite(converted)) {
+          throw new Error(`Could not convert ${parsedCurrency} to ${trip.currency}`);
+        }
+        const convertedAmount = Math.round(converted * 100) / 100;
+        amount = convertedAmount;
+        extraFields.originalCurrency = parsedCurrency;
+        extraFields.originalAmount   = parsed.amount;
+        extraFields.convertedAmount  = convertedAmount;
+      }
+
+      await post(`/trips/${tripId}/expenses`, {
+        description:   parsed.description,
+        amount,
+        paidBy:        parsed.paidBy,
+        splitBetween:  parsed.splitBetween,
+        date:          parsed.date,
+        ...extraFields,
+      });
+      toast('Expense added 💸', 'success');
+      card.remove();
+      renderTripDetail(tripId);
+    } catch (err) {
+      toast(err.message || 'Could not add expense', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Add';
+    }
+  });
+
+  card.querySelector('.ai-edit-btn').addEventListener('click', async () => {
+    // Re-fetch the trip so the edit modal sees any participants that were auto-created during parsing
+    let latestTrip = trip;
+    try { latestTrip = await get(`/trips/${tripId}`); } catch { /* fall back to current trip */ }
+    showAddExpenseModal(latestTrip, () => {
+      card.remove();
+      renderTripDetail(tripId);
+    }, parsed);
+  });
+
+  card.querySelector('.ai-dismiss-btn').addEventListener('click', () => card.remove());
+
+  return card;
 }
 
 // ---------------------------------------------------------------------------
