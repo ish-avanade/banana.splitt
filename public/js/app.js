@@ -339,6 +339,7 @@ async function renderTripDetail(tripId) {
     renderMembersTab(trip, tripId);
     renderDashboard(trip);
     await renderBalancesTab(tripId, trip.currency);
+    await initAiChat(trip, tripId);
   } catch (err) {
     toast(err.message, 'error');
     navigate('');
@@ -380,6 +381,13 @@ function renderExpensesTab(trip, tripId) {
     const catName = expense.category || categorize(expense.description);
     const item = document.createElement('div');
     item.className = 'expense-item';
+
+    // Determine whether to show dual-currency display safely via DOM (not innerHTML)
+    const showConversion = expense.originalCurrency
+      && expense.originalCurrency !== trip.currency
+      && typeof expense.originalAmount === 'number';
+
+    // Use a placeholder token that we'll replace via DOM after setting innerHTML
     item.innerHTML = `
       <div class="expense-icon">${categoryIcon(catName)}</div>
       <div class="expense-body">
@@ -390,12 +398,29 @@ function renderExpensesTab(trip, tripId) {
           · <time>${expense.date}</time>
         </div>
       </div>
-      <div class="expense-amount">${fmt(expense.amount, trip.currency)}</div>
+      <div class="expense-amount"></div>
       <div class="expense-actions">
         <button class="btn btn-ghost btn-sm edit-expense-btn" aria-label="Edit expense" title="Edit">✏️</button>
         <button class="btn btn-ghost btn-sm delete-expense-btn" aria-label="Delete expense" title="Delete">🗑️</button>
       </div>
     `;
+
+    // Populate amount cell with safe DOM nodes to avoid Intl.NumberFormat throws and XSS
+    const amountCell = item.querySelector('.expense-amount');
+    if (showConversion) {
+      let origText, convText;
+      try { origText = fmt(expense.originalAmount, expense.originalCurrency); } catch { origText = String(expense.originalAmount); }
+      try { convText = fmt(expense.amount, trip.currency); } catch { convText = String(expense.amount); }
+      amountCell.appendChild(document.createTextNode(origText));
+      const note = document.createElement('span');
+      note.className = 'conversion-note';
+      note.textContent = `(≈ ${convText})`;
+      amountCell.appendChild(note);
+    } else {
+      let mainText;
+      try { mainText = fmt(expense.amount, trip.currency); } catch { mainText = String(expense.amount); }
+      amountCell.textContent = mainText;
+    }
     item.querySelector('.edit-expense-btn').addEventListener('click', () =>
       showEditExpenseModal(trip, expense, () => renderTripDetail(tripId))
     );
@@ -674,12 +699,19 @@ function renderMembersTab(trip, tripId) {
 // MODALS — Add / Edit Expense
 // ---------------------------------------------------------------------------
 
-function expenseModalHTML(trip, expense) {
+function expenseModalHTML(trip, expense, prefill = null) {
   const participants = trip.participants;
   const today = new Date().toISOString().split('T')[0];
 
-  const splitIds = expense?.splitBetween || participants.map((p) => p.id);
-  const currentCat = expense?.category || categorize(expense?.description || '');
+  // `vals` provides default values: editing an existing expense takes priority,
+  // then AI-prefilled data, then blank.
+  const vals = expense || prefill;
+  const splitIds = vals?.splitBetween || participants.map((p) => p.id);
+
+  // When editing, show original amount if a foreign currency was used
+  const displayAmount = expense?.originalAmount ?? (expense ? expense.amount : (vals?.amount || ''));
+  const expCurrency = expense?.originalCurrency || trip.currency;
+  const currentCat = expense?.category || categorize(vals?.description || '');
 
   return `
     <h2 class="modal-title">${expense ? 'Edit Expense' : 'Add Expense'}</h2>
@@ -687,12 +719,20 @@ function expenseModalHTML(trip, expense) {
       <div class="form-group">
         <label for="exp-desc">Description *</label>
         <input id="exp-desc" type="text" placeholder="e.g. Hotel, Dinner, Taxi…"
-          value="${escAttr(expense?.description || '')}" required maxlength="120" />
+          value="${escAttr(vals?.description || '')}" required maxlength="120" />
       </div>
       <div class="form-group">
-        <label for="exp-amount">Amount (${escHtml(trip.currency)}) *</label>
-        <input id="exp-amount" type="number" step="0.01" min="0.01"
-          value="${expense ? expense.amount : ''}" required placeholder="0.00" />
+        <label for="exp-amount">Amount *</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <input id="exp-amount" type="number" step="0.01" min="0.01"
+            value="${escAttr(String(displayAmount))}" required placeholder="0.00" style="flex:1" />
+          <select id="exp-currency" style="width:7rem">
+            ${CURRENCIES.map((c) =>
+              `<option value="${c.code}"${c.code === expCurrency ? ' selected' : ''}>${c.code}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div id="conversion-preview" style="font-size:.8rem;color:var(--text-muted);margin-top:.25rem;min-height:1.2em"></div>
       </div>
       <div class="form-group">
         <label for="exp-category">Category</label>
@@ -702,13 +742,13 @@ function expenseModalHTML(trip, expense) {
       </div>
       <div class="form-group">
         <label for="exp-date">Date</label>
-        <input id="exp-date" type="date" value="${expense?.date || today}" />
+        <input id="exp-date" type="date" value="${vals?.date || today}" />
       </div>
       <div class="form-group">
         <label for="exp-paidby">Paid by *</label>
         <select id="exp-paidby">
           ${participants.map((p) =>
-            `<option value="${p.id}" ${expense?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
+            `<option value="${p.id}" ${vals?.paidBy === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
           ).join('')}
         </select>
       </div>
@@ -734,12 +774,12 @@ function expenseModalHTML(trip, expense) {
   `;
 }
 
-function showAddExpenseModal(trip, onSuccess) {
+function showAddExpenseModal(trip, onSuccess, prefill = null) {
   if (trip.participants.length === 0) {
     toast('Add members to the trip before adding expenses.', 'error');
     return;
   }
-  openModal(expenseModalHTML(trip));
+  openModal(expenseModalHTML(trip, null, prefill));
   attachExpenseFormHandlers(trip, null, onSuccess);
 }
 
@@ -764,13 +804,69 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
     });
   }
 
+  // Live conversion preview
+  let conversionRate = null;
+  let lastConvertedAmount = null;
+  let conversionTimeout = null;
+
+  async function updateConversionPreview() {
+    const amountVal = parseFloat(document.getElementById('exp-amount').value);
+    const expCurrency = document.getElementById('exp-currency').value;
+    const dateVal = document.getElementById('exp-date').value;
+    const preview = document.getElementById('conversion-preview');
+
+    if (expCurrency === trip.currency || !amountVal || amountVal <= 0) {
+      preview.textContent = '';
+      conversionRate = null;
+      lastConvertedAmount = null;
+      return;
+    }
+
+    preview.textContent = 'Fetching rate…';
+    try {
+      const date = dateVal || new Date().toISOString().split('T')[0];
+      const url = `https://api.frankfurter.dev/v1/${date}?from=${expCurrency}&to=${trip.currency}&amount=${amountVal}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Rate unavailable');
+      const data = await res.json();
+      const converted = data.rates[trip.currency];
+      if (typeof converted !== 'number') throw new Error('Rate unavailable');
+      conversionRate = converted / amountVal;
+      lastConvertedAmount = Math.round(converted * 100) / 100;
+      preview.textContent = `≈ ${fmt(lastConvertedAmount, trip.currency)} at ${conversionRate.toFixed(4)} rate`;
+    } catch {
+      conversionRate = null;
+      lastConvertedAmount = null;
+      preview.textContent = 'Could not fetch rate — will use 1:1';
+    }
+  }
+
+  function schedulePreviewUpdate() {
+    clearTimeout(conversionTimeout);
+    conversionTimeout = setTimeout(updateConversionPreview, 500);
+  }
+
+  document.getElementById('exp-amount').addEventListener('input', schedulePreviewUpdate);
+  document.getElementById('exp-currency').addEventListener('change', updateConversionPreview);
+  document.getElementById('exp-date').addEventListener('change', updateConversionPreview);
+
+  // Show initial preview if editing a foreign-currency expense
+  if (expense?.originalCurrency && expense.originalCurrency !== trip.currency) {
+    const preview = document.getElementById('conversion-preview');
+    const rate = expense.originalAmount > 0
+      ? (expense.convertedAmount / expense.originalAmount).toFixed(4)
+      : '1.0000';
+    preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
+  }
+
   document.getElementById('expense-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const description  = document.getElementById('exp-desc').value.trim();
-    const amount       = parseFloat(document.getElementById('exp-amount').value);
-    const date         = document.getElementById('exp-date').value;
-    const paidBy       = document.getElementById('exp-paidby').value;
-    const category     = document.getElementById('exp-category').value;
+    const description = document.getElementById('exp-desc').value.trim();
+    const date        = document.getElementById('exp-date').value;
+    const paidBy      = document.getElementById('exp-paidby').value;
+    const expCurrency = document.getElementById('exp-currency').value;
+    const rawAmount   = parseFloat(document.getElementById('exp-amount').value);
+    const category    = document.getElementById('exp-category').value;
     const splitBetween = [...document.querySelectorAll('#split-checkboxes input:checked')]
       .map((cb) => cb.value);
 
@@ -779,15 +875,53 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
+    // Determine final amount in trip currency and optional conversion fields
+    let amount = rawAmount;
+    let extraFields = {};
+
+    if (expCurrency !== trip.currency) {
+      if (conversionRate !== null) {
+        // Use lastConvertedAmount when amount matches the preview, else reapply rate
+        const previewAmount = parseFloat(document.getElementById('exp-amount').value);
+        amount = lastConvertedAmount !== null && previewAmount === rawAmount
+          ? lastConvertedAmount
+          : Math.round(rawAmount * conversionRate * 100) / 100;
+      } else {
+        // Fallback: try one more fetch; if fails, use 1:1
+        try {
+          const date2 = date || new Date().toISOString().split('T')[0];
+          const url = `https://api.frankfurter.dev/v1/${date2}?from=${expCurrency}&to=${trip.currency}&amount=${rawAmount}`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('rate fetch failed');
+          const data = await res.json();
+          const converted = data.rates?.[trip.currency];
+          if (typeof converted !== 'number') throw new Error('rate missing');
+          amount = Math.round(converted * 100) / 100;
+        } catch {
+          toast('Exchange rate unavailable — using 1:1 conversion', 'error');
+        }
+      }
+      extraFields = {
+        originalCurrency: expCurrency,
+        originalAmount: rawAmount,
+        convertedAmount: amount,
+      };
+    } else {
+      // Same currency — clear any previous conversion data when editing
+      if (expense?.originalCurrency) {
+        extraFields = { originalCurrency: trip.currency };
+      }
+    }
+
     try {
       if (expense) {
         await put(`/trips/${trip.id}/expenses/${expense.id}`, {
-          description, amount, date, paidBy, splitBetween, category,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense updated', 'success');
       } else {
         await post(`/trips/${trip.id}/expenses`, {
-          description, amount, date, paidBy, splitBetween, category,
+          description, amount, date, paidBy, splitBetween, category, ...extraFields,
         });
         toast('Expense added 💸', 'success');
       }
@@ -877,6 +1011,152 @@ async function confirmRemoveMember(trip, participant, onSuccess) {
       toast(err.message, 'error');
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// AI CHAT — Natural language expense entry
+// ---------------------------------------------------------------------------
+
+async function initAiChat(trip, tripId) {
+  const chatBar = document.getElementById('ai-chat-bar');
+  if (!chatBar) return;
+
+  try {
+    const { enabled } = await get('/ai-enabled');
+    if (!enabled) return;
+  } catch {
+    return;
+  }
+
+  chatBar.classList.remove('hidden');
+
+  const form    = document.getElementById('ai-chat-form');
+  const input   = document.getElementById('ai-chat-input');
+  const results = document.getElementById('ai-parsed-results');
+  const sendBtn = form.querySelector('.ai-chat-send');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+    results.innerHTML = '';
+
+    try {
+      const { expenses } = await post(`/trips/${tripId}/parse-expense`, { message });
+
+      if (!expenses || expenses.length === 0) {
+        toast('Could not parse any expenses. Try being more specific or use the form.', 'error');
+        return;
+      }
+
+      input.value = '';
+      for (const expense of expenses) {
+        results.appendChild(renderAiExpenseCard(trip, expense, tripId));
+      }
+    } catch {
+      toast('Could not parse the message — try the form instead.', 'error');
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  });
+}
+
+function renderAiExpenseCard(trip, parsed, tripId) {
+  const card = document.createElement('div');
+  card.className = 'ai-expense-card';
+
+  const payerName      = parsed.paidByName || '?';
+  const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
+  // Validate parsed currency (must be a 3-letter ISO code present in the known list); fall back to trip currency
+  const parsedCurrency = (parsed.currency && /^[A-Z]{3}$/.test(parsed.currency)) ? parsed.currency : null;
+  const displayCurrency = parsedCurrency || trip.currency;
+  const currencyMismatch = parsedCurrency && parsedCurrency !== trip.currency;
+
+  card.innerHTML = `
+    <div class="ai-expense-card-body">
+      <div class="ai-expense-card-desc">${escHtml(parsed.description || 'Untitled')}</div>
+      <div class="ai-expense-card-meta">
+        Paid by <strong>${escHtml(payerName)}</strong>
+        · Split: ${escHtml(splitNames)}
+        · <time>${escHtml(parsed.date || '')}</time>
+        ${currencyMismatch ? `· <span class="ai-currency-warning">⚠ Currency: ${escHtml(parsed.currency)} (trip uses ${escHtml(trip.currency)})</span>` : ''}
+      </div>
+    </div>
+    <div class="ai-expense-card-amount">${fmt(parsed.amount || 0, displayCurrency)}</div>
+    <div class="ai-expense-card-actions">
+      <button class="btn btn-primary btn-sm ai-add-btn">Add</button>
+      <button class="btn btn-secondary btn-sm ai-edit-btn">Edit</button>
+      <button class="btn btn-ghost btn-sm ai-dismiss-btn" aria-label="Dismiss">✕</button>
+    </div>
+  `;
+
+  card.querySelector('.ai-add-btn').addEventListener('click', async () => {
+    if (!parsed.paidBy || !parsed.splitBetween?.length) {
+      toast('Could not match all participant names — use Edit to fill in manually.', 'error');
+      return;
+    }
+    const btn = card.querySelector('.ai-add-btn');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      let amount = parsed.amount;
+      const extraFields = {};
+
+      if (currencyMismatch) {
+        const date = parsed.date || new Date().toISOString().split('T')[0];
+        const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
+        convUrl.searchParams.set('from', parsedCurrency);
+        convUrl.searchParams.set('to', trip.currency);
+        convUrl.searchParams.set('amount', String(parsed.amount));
+        const convRes = await fetch(convUrl);
+        if (!convRes.ok) throw new Error('Could not fetch currency conversion');
+        const convData = await convRes.json();
+        const converted = convData.rates?.[trip.currency];
+        if (typeof converted !== 'number' || !Number.isFinite(converted)) {
+          throw new Error(`Could not convert ${parsedCurrency} to ${trip.currency}`);
+        }
+        const convertedAmount = Math.round(converted * 100) / 100;
+        amount = convertedAmount;
+        extraFields.originalCurrency = parsedCurrency;
+        extraFields.originalAmount   = parsed.amount;
+        extraFields.convertedAmount  = convertedAmount;
+      }
+
+      await post(`/trips/${tripId}/expenses`, {
+        description:   parsed.description,
+        amount,
+        paidBy:        parsed.paidBy,
+        splitBetween:  parsed.splitBetween,
+        date:          parsed.date,
+        ...extraFields,
+      });
+      toast('Expense added 💸', 'success');
+      card.remove();
+      renderTripDetail(tripId);
+    } catch (err) {
+      toast(err.message || 'Could not add expense', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Add';
+    }
+  });
+
+  card.querySelector('.ai-edit-btn').addEventListener('click', async () => {
+    // Re-fetch the trip so the edit modal sees any participants that were auto-created during parsing
+    let latestTrip = trip;
+    try { latestTrip = await get(`/trips/${tripId}`); } catch { /* fall back to current trip */ }
+    showAddExpenseModal(latestTrip, () => {
+      card.remove();
+      renderTripDetail(tripId);
+    }, parsed);
+  });
+
+  card.querySelector('.ai-dismiss-btn').addEventListener('click', () => card.remove());
+
+  return card;
 }
 
 // ---------------------------------------------------------------------------
