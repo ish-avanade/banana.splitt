@@ -951,8 +951,7 @@ const SPLIT_HINT_BY_CATEGORY = {
   'Transport':     'This looks like transport — consider splitting between specific people only?',
 };
 
-function getSplitHint(description) {
-  const cat = categorize(description);
+function getSplitHint(cat) {
   return SPLIT_HINT_BY_CATEGORY[cat] || null;
 }
 
@@ -966,8 +965,12 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
 
   const descInput = document.getElementById('exp-desc');
   const hintEl    = document.getElementById('split-hint');
-  function updateHint() {
-    const hint = getSplitHint(descInput.value);
+  function onDescInput() {
+    const desc = descInput.value.trim();
+    const cat  = categorize(desc);
+
+    // Update split hint
+    const hint = getSplitHint(cat);
     if (hint) {
       hintEl.textContent = '💡 ' + hint;
       hintEl.classList.remove('hidden');
@@ -975,17 +978,15 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       hintEl.textContent = '';
       hintEl.classList.add('hidden');
     }
-  }
-  descInput.addEventListener('input', updateHint);
-  // Show hint immediately if editing an existing expense with a matching description
-  updateHint();
 
-  // Auto-categorize when description changes (only for new expenses)
-  if (!expense) {
-    descInput.addEventListener('input', () => {
-      document.getElementById('exp-category').value = categorize(descInput.value.trim());
-    });
+    // Auto-categorize (only for new expenses)
+    if (!expense) {
+      document.getElementById('exp-category').value = cat;
+    }
   }
+  descInput.addEventListener('input', onDescInput);
+  // Evaluate immediately for pre-filled descriptions (edit flow)
+  onDescInput();
 
   // Live conversion preview
   let conversionRate = null;
