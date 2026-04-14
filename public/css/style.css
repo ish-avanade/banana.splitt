@@ -413,6 +413,7 @@ main#main-content {
 .settlement-to   { font-weight: 700; color: var(--green); }
 .settlement-arrow { color: var(--blue); font-size: 1rem; }
 .settlement-amount { margin-left: auto; font-weight: 800; color: var(--blue); font-size: .95rem; }
+.settlement-remind-btn { margin-left: .5rem; flex-shrink: 0; }
 
 /* ---- Members ---------------------------------------------- */
 .members-toolbar { margin-bottom: 1rem; }
@@ -485,6 +486,8 @@ main#main-content {
 }
 .modal-close:hover { background: var(--bg); color: var(--text); }
 .modal-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 1.25rem; }
+.reminder-subtitle { font-size: .85rem; color: var(--text-muted); margin-bottom: 1rem; margin-top: -.75rem; }
+.reminder-textarea { width: 100%; font-size: .9rem; line-height: 1.5; resize: vertical; min-height: 110px; }
 
 /* ---- Forms ------------------------------------------------- */
 .form-group { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; }

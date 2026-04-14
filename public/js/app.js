@@ -343,7 +343,7 @@ async function renderTripDetail(tripId) {
     renderExpensesTab(trip, tripId);
     renderMembersTab(trip, tripId);
     renderDashboard(trip);
-    await renderBalancesTab(tripId, trip.currency);
+    await renderBalancesTab(tripId, trip.currency, trip);
     await initAiChat(trip, tripId);
   } catch (err) {
     toast(err.message, 'error');
@@ -582,7 +582,7 @@ function renderChartLegend(container, slices, total, currency) {
 
 // ---- Balances tab ----
 
-async function renderBalancesTab(tripId, currency) {
+async function renderBalancesTab(tripId, currency, trip) {
   try {
     const { balances, settlements } = await get(`/trips/${tripId}/balances`);
     const balList = document.getElementById('balances-list');
@@ -621,7 +621,11 @@ async function renderBalancesTab(tripId, currency) {
           <span class="settlement-arrow">→</span>
           to
           <span class="settlement-to">${escHtml(s.toName)}</span>
+          <button class="btn btn-ghost btn-sm settlement-remind-btn" title="Send payment reminder">📩 Remind</button>
         `;
+        div.querySelector('.settlement-remind-btn').addEventListener('click', () =>
+          showReminderModal(trip, s, currency)
+        );
         setList.appendChild(div);
       }
     }
@@ -667,6 +671,50 @@ async function shareBalancesSummary(tripId, trip) {
     if (err.name !== 'AbortError') {
       toast(err.message, 'error');
     }
+  }
+}
+
+// ---- Payment reminder modal ----
+
+function showReminderModal(trip, settlement, currency) {
+  const message = `Hey ${settlement.fromName}! 👋 Quick reminder from our ${trip.name} trip — you owe ${settlement.toName} ${fmt(settlement.amount, currency)}. No rush, just keeping track with banana/splitt 🍌`;
+
+  openModal(`
+    <h2 class="modal-title">📩 Payment Reminder</h2>
+    <p class="reminder-subtitle">Edit the message below before sending.</p>
+    <div class="form-group">
+      <textarea id="reminder-message" class="reminder-textarea" rows="5"></textarea>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" id="reminder-cancel">Cancel</button>
+      ${navigator.share ? `<button type="button" class="btn btn-secondary" id="reminder-share">📤 Share</button>` : ''}
+      <button type="button" class="btn btn-primary" id="reminder-copy">📋 Copy</button>
+    </div>
+  `);
+
+  document.getElementById('reminder-message').value = message;
+  document.getElementById('reminder-cancel').addEventListener('click', closeModal);
+
+  document.getElementById('reminder-copy').addEventListener('click', async () => {
+    const text = document.getElementById('reminder-message').value;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Message copied to clipboard!', 'success');
+      closeModal();
+    } catch {
+      toast('Could not copy to clipboard.', 'error');
+    }
+  });
+
+  if (navigator.share) {
+    document.getElementById('reminder-share').addEventListener('click', async () => {
+      const text = document.getElementById('reminder-message').value;
+      try {
+        await navigator.share({ title: `Payment reminder — ${trip.name}`, text });
+      } catch (err) {
+        if (err.name !== 'AbortError') toast(err.message, 'error');
+      }
+    });
   }
 }
 
