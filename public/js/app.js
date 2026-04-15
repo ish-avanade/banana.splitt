@@ -954,12 +954,13 @@ function drawHorizontalBarChart(canvas, bars, currency) {
 
     ctx.fillStyle = (/^#[0-9a-fA-F]{3,8}$/.test(bar.color) ? bar.color : null) || PIE_COLORS[i % PIE_COLORS.length];
     if (barLen > 0) {
+      const effectiveR = Math.min(r, barLen / 2);
       ctx.beginPath();
       ctx.moveTo(bx, by);
-      ctx.lineTo(bx + barLen - r, by);
-      ctx.arcTo(bx + barLen, by, bx + barLen, by + r, r);
-      ctx.lineTo(bx + barLen, by + barH - r);
-      ctx.arcTo(bx + barLen, by + barH, bx + barLen - r, by + barH, r);
+      ctx.lineTo(bx + barLen - effectiveR, by);
+      ctx.arcTo(bx + barLen, by, bx + barLen, by + effectiveR, effectiveR);
+      ctx.lineTo(bx + barLen, by + barH - effectiveR);
+      ctx.arcTo(bx + barLen, by + barH, bx + barLen - effectiveR, by + barH, effectiveR);
       ctx.lineTo(bx, by + barH);
       ctx.closePath();
       ctx.fill();
