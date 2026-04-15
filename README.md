@@ -16,7 +16,7 @@
 - **Trip management** — create, edit, and delete trips with a name, description, and base currency
 - **Participant management** — add and remove members per trip; members auto-created from AI-parsed expenses
 - **Expense tracking** — record expenses with date, payer, amount, and flexible equal or custom splits
-- **Multi-currency support** — enter expenses in any currency; automatic conversion to the trip base currency via the [Frankfurter API](https://www.frankfurter.app/)
+- **Multi-currency support** — enter expenses in any currency; automatic conversion to the trip base currency via the [Frankfurter API](https://api.frankfurter.dev/v1/)
 - **AI-powered expense entry** — type a natural language message (e.g. _"Alice paid $50 for dinner"_) and let the AI parse it into a structured expense
 - **Auto-member creation** — AI parsing detects new participant names and adds them to the trip automatically
 - **Expense categorisation** — choose a category (food, transport, accommodation, etc.) with matching icons for each expense
@@ -106,7 +106,7 @@ OPENAI_API_KEY=<your-key>
 
 ### Checking AI status
 
-`GET /api/ai-enabled` returns `{ "enabled": true }` when an AI provider is configured, or `{ "enabled": false }` otherwise. The frontend uses this endpoint to show or hide the AI chat bar.
+`GET /api/ai-enabled` returns `{ "enabled": true }` when AI features are available, either because an AI provider is configured or because mock AI responses are enabled via the `MOCK_AI_RESPONSE` environment variable (used for development/tests). It returns `{ "enabled": false }` otherwise. The frontend uses this endpoint to show or hide the AI chat bar.
 
 ## API Endpoints
 
