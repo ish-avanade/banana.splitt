@@ -964,11 +964,11 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     // Amount label
     ctx.fillStyle = '#111827';
     ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     let amtStr;
     try { amtStr = fmt(bar.amount, currency); } catch { amtStr = String(bar.amount); }
-    ctx.fillText(amtStr, nameW + 4 + barAreaW + 6, y + rowH / 2 - padV);
+    ctx.fillText(amtStr, nameW + 4 + barAreaW + amtW - 4, y + rowH / 2 - padV);
   });
 }
 
