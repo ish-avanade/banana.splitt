@@ -1485,18 +1485,25 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
+    // Use the trip-currency amount for comparisons (post-conversion when a foreign currency is selected)
+    const expCurrency = document.getElementById('exp-currency').value;
+    const compareAmount = (expCurrency && expCurrency !== trip.currency && lastConvertedAmount !== null)
+      ? lastConvertedAmount
+      : amount;
+
     const comparisons = expense
       ? trip.expenses.filter((e) => e.id !== expense.id)
       : trip.expenses;
 
-    // Duplicate check: same amount ±5%, same date, description substring match
+    // Duplicate check: same amount ±5%, same date, bidirectional description substring match
     if (desc.length > 0) {
       const descLower = desc.toLowerCase();
       const dup = comparisons.find((e) =>
         e.amount > 0 &&
-        Math.abs(e.amount - amount) / Math.max(e.amount, amount) < 0.05 &&
+        Math.abs(e.amount - compareAmount) / Math.max(e.amount, compareAmount) < 0.05 &&
         e.date === date &&
-        e.description.toLowerCase().includes(descLower)
+        (e.description.toLowerCase().includes(descLower) ||
+         descLower.includes(e.description.toLowerCase()))
       );
       if (dup) {
         warningTextEl.textContent =
@@ -1506,10 +1513,10 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       }
     }
 
-    // Anomaly check: amount > 5× average of existing expenses
+    // Anomaly check: compareAmount > 5× average of existing expenses (trip-currency amounts)
     if (comparisons.length > 0) {
       const avg = comparisons.reduce((s, e) => s + e.amount, 0) / comparisons.length;
-      if (amount > avg * 5) {
+      if (compareAmount > avg * 5) {
         warningTextEl.textContent =
           `⚠️ This is much larger than your average expense (${fmt(avg, trip.currency)}). Double-check the amount.`;
         warningEl.classList.remove('hidden');
