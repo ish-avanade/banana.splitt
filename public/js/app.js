@@ -556,7 +556,7 @@ function renderDashboard(trip) {
   const pieContainer    = document.getElementById('pie-chart-container');
   const barContainer    = document.getElementById('bar-chart-container');
   const barCanvas       = document.getElementById('bar-chart');
-  const barExportBtn    = document.getElementById('bar-chart-export');
+  const exportBtn       = document.getElementById('chart-export');
   const togglePayer     = document.getElementById('chart-toggle-payer');
   const toggleCat       = document.getElementById('chart-toggle-category');
   const toggleTime      = document.getElementById('chart-toggle-time');
@@ -584,12 +584,14 @@ function renderDashboard(trip) {
     showPieView();
     drawPieChart(canvas, slices, trip.currency);
     renderChartLegend(legendEl, slices, total, trip.currency);
+    exportBtn.onclick = () => exportCanvasPng(canvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-payer.png`);
   }
 
   function showCategoryChart() {
     setActiveToggle(toggleCat);
     showPieView();
     renderCategoryChart(canvas, legendEl, trip);
+    exportBtn.onclick = () => exportCanvasPng(canvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-category.png`);
   }
 
   function showTimeChart() {
@@ -604,20 +606,24 @@ function renderDashboard(trip) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, amount]) => ({ label: formatShortDate(date), amount }));
     drawBarChart(barCanvas, bars, trip.currency);
-    barExportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-over-time.png`);
+    exportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-over-time.png`);
   }
 
   function showMemberChart() {
     setActiveToggle(toggleMember);
     showBarView();
-    // Build per-member data
+    // Build per-member data using a single pass over expenses
+    const amountByPayerId = {};
+    for (const e of trip.expenses) {
+      amountByPayerId[e.paidBy] = (amountByPayerId[e.paidBy] || 0) + e.amount;
+    }
     const bars = trip.participants.map((p, i) => ({
       name: p.name,
-      amount: trip.expenses.filter((e) => e.paidBy === p.id).reduce((s, e) => s + e.amount, 0),
+      amount: amountByPayerId[p.id] || 0,
       color: PIE_COLORS[i % PIE_COLORS.length],
     })).filter((b) => b.amount > 0).sort((a, b) => b.amount - a.amount);
     drawHorizontalBarChart(barCanvas, bars, trip.currency);
-    barExportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-member.png`);
+    exportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-member.png`);
   }
 
   togglePayer.addEventListener('click', showPayerChart);
@@ -829,19 +835,37 @@ function formatShortDate(isoDate) {
   const parts = isoDate ? isoDate.split('-') : [];
   if (parts.length !== 3) return isoDate || '';
   const [, m, d] = parts;
-  // Use locale to decide MM/DD vs DD/MM
+  // Use Intl.DateTimeFormat formatToParts to reliably detect day-first vs month-first
   const locale = navigator.language || 'en';
-  const testDate = new Date(2013, 0, 2); // Jan 2 — unambiguous
-  const testStr = testDate.toLocaleDateString(locale, { month: '2-digit', day: '2-digit' });
-  const dayFirst = testStr.indexOf('02') < testStr.indexOf('01');
+  const testDate = new Date(2013, 0, 2); // Jan 2 — unambiguous day vs month
+  const formatter = new Intl.DateTimeFormat(locale, { month: '2-digit', day: '2-digit' });
+  const dateParts = typeof formatter.formatToParts === 'function'
+    ? formatter.formatToParts(testDate)
+    : [];
+  const dayIndex = dateParts.findIndex((p) => p.type === 'day');
+  const monthIndex = dateParts.findIndex((p) => p.type === 'month');
+  const dayFirst = dayIndex !== -1 && monthIndex !== -1 ? dayIndex < monthIndex : false;
   return dayFirst ? `${d}/${m}` : `${m}/${d}`;
 }
 
 function drawBarChart(canvas, bars, currency) {
   if (!bars || bars.length === 0) return;
   const dpr = window.devicePixelRatio || 1;
-  const W = 500;
+  const barGap    = 4;
+  const minBarW   = 20;
+  const padTop    = 16;
+  const padBottom = 36;
+  const padLeft   = 12;
+  const padRight  = 12;
   const H = 200;
+  // Expand canvas width if needed to maintain minimum bar width.
+  // Layout: gap | bar | gap | bar | ... | bar | gap  → n bars with (n+1) gaps
+  const n = bars.length;
+  const minW = padLeft + padRight + barGap * (n + 1) + minBarW * n;
+  const W = Math.max(500, minW);
+  const chartW    = W - padLeft - padRight;
+  const chartH    = H - padTop - padBottom;
+
   canvas.width  = W * dpr;
   canvas.height = H * dpr;
   canvas.style.width  = W + 'px';
@@ -850,19 +874,10 @@ function drawBarChart(canvas, bars, currency) {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
-  const padTop    = 16;
-  const padBottom = 36;
-  const padLeft   = 12;
-  const padRight  = 12;
-  const chartW    = W - padLeft - padRight;
-  const chartH    = H - padTop - padBottom;
-
   const maxAmount = Math.max(...bars.map((b) => b.amount));
   if (maxAmount === 0) return;
 
-  const n = bars.length;
-  const barGap  = 4;
-  const barW    = Math.floor((chartW - barGap * (n + 1)) / n);
+  const barW = Math.floor((chartW - barGap * (n + 1)) / n);
 
   // Gridlines
   const gridLines = 4;
@@ -939,7 +954,7 @@ function drawHorizontalBarChart(canvas, bars, currency) {
       name = name.slice(0, -1);
     }
     if (name !== bar.name) name += '…';
-    ctx.fillText(name, nameW - 4, y + rowH / 2 - padV);
+    ctx.fillText(name, nameW - 4, by + barH / 2);
 
     // Bar
     const barH   = rowH - padV * 2;
@@ -950,12 +965,13 @@ function drawHorizontalBarChart(canvas, bars, currency) {
 
     ctx.fillStyle = (/^#[0-9a-fA-F]{3,8}$/.test(bar.color) ? bar.color : null) || PIE_COLORS[i % PIE_COLORS.length];
     if (barLen > 0) {
+      const effectiveR = Math.min(r, barLen / 2);
       ctx.beginPath();
       ctx.moveTo(bx, by);
-      ctx.lineTo(bx + barLen - r, by);
-      ctx.arcTo(bx + barLen, by, bx + barLen, by + r, r);
-      ctx.lineTo(bx + barLen, by + barH - r);
-      ctx.arcTo(bx + barLen, by + barH, bx + barLen - r, by + barH, r);
+      ctx.lineTo(bx + barLen - effectiveR, by);
+      ctx.arcTo(bx + barLen, by, bx + barLen, by + effectiveR, effectiveR);
+      ctx.lineTo(bx + barLen, by + barH - effectiveR);
+      ctx.arcTo(bx + barLen, by + barH, bx + barLen - effectiveR, by + barH, effectiveR);
       ctx.lineTo(bx, by + barH);
       ctx.closePath();
       ctx.fill();
@@ -968,12 +984,13 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     ctx.textBaseline = 'middle';
     let amtStr;
     try { amtStr = fmt(bar.amount, currency); } catch { amtStr = String(bar.amount); }
-    ctx.fillText(amtStr, nameW + 4 + barAreaW + amtW - 4, y + rowH / 2 - padV);
+    ctx.fillText(amtStr, nameW + 4 + barAreaW + amtW - 4, by + barH / 2);
   });
 }
 
 function sanitizeFilename(name) {
-  return (name || 'trip').replace(/[^a-z0-9-]+/gi, '-').toLowerCase().replace(/^-|-$/g, '');
+  const safe = (name || 'trip').replace(/[^a-z0-9-]+/gi, '-').toLowerCase().replace(/^-|-$/g, '');
+  return safe || 'trip';
 }
 
 function exportCanvasPng(canvas, filename) {

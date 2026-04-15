@@ -301,6 +301,11 @@ main#main-content {
   gap: .5rem;
 }
 .chart-section-header .section-title { margin-bottom: 0; }
+.chart-section-controls {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
 .chart-toggles {
   display: flex;
   gap: .25rem;
@@ -338,13 +343,10 @@ main#main-content {
 }
 #pie-chart { flex-shrink: 0; }
 .chart-legend { flex: 1; display: flex; flex-direction: column; gap: .5rem; }
-.bar-chart-container { flex-direction: column; align-items: flex-start; position: relative; }
+.bar-chart-container { flex-direction: column; align-items: flex-start; }
 .bar-chart-wrap { width: 100%; overflow-x: auto; }
 #bar-chart { display: block; max-width: 100%; }
 .chart-export-btn {
-  position: absolute;
-  top: .75rem;
-  right: .75rem;
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -353,6 +355,7 @@ main#main-content {
   padding: .2rem .5rem;
   color: var(--text-muted);
   transition: background .15s, color .15s;
+  flex-shrink: 0;
 }
 .chart-export-btn:hover { background: var(--bg); color: var(--text); }
 .legend-item {
