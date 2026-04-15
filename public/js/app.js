@@ -611,9 +611,13 @@ function renderDashboard(trip) {
     setActiveToggle(toggleMember);
     showBarView();
     // Build per-member data
+    const amountByPayerId = {};
+    for (const e of trip.expenses) {
+      amountByPayerId[e.paidBy] = (amountByPayerId[e.paidBy] || 0) + e.amount;
+    }
     const bars = trip.participants.map((p, i) => ({
       name: p.name,
-      amount: trip.expenses.filter((e) => e.paidBy === p.id).reduce((s, e) => s + e.amount, 0),
+      amount: amountByPayerId[p.id] || 0,
       color: PIE_COLORS[i % PIE_COLORS.length],
     })).filter((b) => b.amount > 0).sort((a, b) => b.amount - a.amount);
     drawHorizontalBarChart(barCanvas, bars, trip.currency);
