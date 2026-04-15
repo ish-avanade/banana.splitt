@@ -1,3 +1,8 @@
+---
+name: data-visualization
+description: "Conventions and patterns for rendering charts and data visualizations in banana/splitt. Load this skill when implementing canvas-based charts, graphs, legends, or any visual data representation."
+---
+
 # Data Visualization on Canvas — Skill
 
 > Conventions and patterns for rendering charts and data visualizations in banana/splitt.
