@@ -1646,9 +1646,15 @@ function dateUpdatePrompt(label, current, proposed) {
 /**
  * After an expense is saved, check whether the trip's date range should be updated:
  * - No dates set: silently auto-set start/end from all expense dates.
+ * - startDate set but no endDate: silently auto-set endDate from max of all expense dates.
+ * - endDate set but no startDate: silently auto-set startDate from min of all expense dates.
  * - Expense predates startDate: prompt the user.
  * - Expense postdates endDate: prompt the user.
  * The expense is already saved regardless of the user's choice. onSuccess() is called at the end.
+ *
+ * NOTE: date comparisons use ISO string comparison ("YYYY-MM-DD" < "YYYY-MM-DD") intentionally —
+ * do NOT convert to Date objects here as that causes UTC timezone bugs (midnight UTC parses as
+ * the previous day in behind-UTC timezones). See .github/skills/trip-dates/SKILL.md.
  */
 async function checkAndUpdateTripDates(trip, expenseDate, editingExpenseId, onSuccess) {
   if (!expenseDate) { onSuccess(); return; }
@@ -1674,7 +1680,35 @@ async function checkAndUpdateTripDates(trip, expenseDate, editingExpenseId, onSu
     return;
   }
 
-  if (!noStart && expenseDate < trip.startDate) {
+  // startDate is set but endDate is missing — auto-derive endDate from all expense dates
+  if (!noStart && noEnd) {
+    const allDates = trip.expenses
+      .filter(e => e.id !== editingExpenseId)
+      .map(e => e.date).filter(Boolean);
+    allDates.push(expenseDate);
+    allDates.sort();
+    try {
+      await put(`/trips/${trip.id}`, { endDate: allDates[allDates.length - 1] });
+    } catch (_) { /* silently ignore — forecast is non-critical */ }
+    onSuccess();
+    return;
+  }
+
+  // endDate is set but startDate is missing — auto-derive startDate from all expense dates
+  if (noStart && !noEnd) {
+    const allDates = trip.expenses
+      .filter(e => e.id !== editingExpenseId)
+      .map(e => e.date).filter(Boolean);
+    allDates.push(expenseDate);
+    allDates.sort();
+    try {
+      await put(`/trips/${trip.id}`, { startDate: allDates[0] });
+    } catch (_) { /* silently ignore — forecast is non-critical */ }
+    onSuccess();
+    return;
+  }
+
+  if (expenseDate < trip.startDate) {
     const ok = await dateUpdatePrompt('start', trip.startDate, expenseDate);
     if (ok) {
       try {
@@ -1683,7 +1717,7 @@ async function checkAndUpdateTripDates(trip, expenseDate, editingExpenseId, onSu
     }
   }
 
-  if (!noEnd && expenseDate > trip.endDate) {
+  if (expenseDate > trip.endDate) {
     const ok = await dateUpdatePrompt('end', trip.endDate, expenseDate);
     if (ok) {
       try {
