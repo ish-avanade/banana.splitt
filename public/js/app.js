@@ -943,6 +943,13 @@ function drawHorizontalBarChart(canvas, bars, currency) {
   bars.forEach((bar, i) => {
     const y = 20 + i * rowH;
 
+    // Bar geometry — computed first so name/amount labels can share the same y-centre
+    const barH   = rowH - padV * 2;
+    const barLen = maxAmount > 0 ? (bar.amount / maxAmount) * barAreaW : 0;
+    const bx     = nameW + 4;
+    const by     = y + padV;
+    const r      = Math.min(4, barH / 2);
+
     // Member name
     ctx.fillStyle = '#111827';
     ctx.font = '600 12px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -957,12 +964,6 @@ function drawHorizontalBarChart(canvas, bars, currency) {
     ctx.fillText(name, nameW - 4, by + barH / 2);
 
     // Bar
-    const barH   = rowH - padV * 2;
-    const barLen = maxAmount > 0 ? (bar.amount / maxAmount) * barAreaW : 0;
-    const bx     = nameW + 4;
-    const by     = y + padV;
-    const r      = Math.min(4, barH / 2);
-
     ctx.fillStyle = (/^#[0-9a-fA-F]{3,8}$/.test(bar.color) ? bar.color : null) || PIE_COLORS[i % PIE_COLORS.length];
     if (barLen > 0) {
       const effectiveR = Math.min(r, barLen / 2);
