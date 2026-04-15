@@ -551,26 +551,85 @@ function renderDashboard(trip) {
   }
   chartSection.classList.remove('hidden');
 
-  const canvas     = document.getElementById('pie-chart');
-  const legendEl   = document.getElementById('chart-legend');
-  const togglePayer = document.getElementById('chart-toggle-payer');
-  const toggleCat   = document.getElementById('chart-toggle-category');
+  const canvas          = document.getElementById('pie-chart');
+  const legendEl        = document.getElementById('chart-legend');
+  const pieContainer    = document.getElementById('pie-chart-container');
+  const barContainer    = document.getElementById('bar-chart-container');
+  const barCanvas       = document.getElementById('bar-chart');
+  const exportBtn       = document.getElementById('chart-export');
+  const togglePayer     = document.getElementById('chart-toggle-payer');
+  const toggleCat       = document.getElementById('chart-toggle-category');
+  const toggleTime      = document.getElementById('chart-toggle-time');
+  const toggleMember    = document.getElementById('chart-toggle-member');
+
+  const allToggles = [togglePayer, toggleCat, toggleTime, toggleMember];
+
+  function setActiveToggle(btn) {
+    allToggles.forEach((t) => t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function showPieView() {
+    pieContainer.classList.remove('hidden');
+    barContainer.classList.add('hidden');
+  }
+
+  function showBarView() {
+    pieContainer.classList.add('hidden');
+    barContainer.classList.remove('hidden');
+  }
 
   function showPayerChart() {
-    togglePayer.classList.add('active');
-    toggleCat.classList.remove('active');
+    setActiveToggle(togglePayer);
+    showPieView();
     drawPieChart(canvas, slices, trip.currency);
     renderChartLegend(legendEl, slices, total, trip.currency);
+    exportBtn.onclick = () => exportCanvasPng(canvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-payer.png`);
   }
 
   function showCategoryChart() {
-    togglePayer.classList.remove('active');
-    toggleCat.classList.add('active');
+    setActiveToggle(toggleCat);
+    showPieView();
     renderCategoryChart(canvas, legendEl, trip);
+    exportBtn.onclick = () => exportCanvasPng(canvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-category.png`);
+  }
+
+  function showTimeChart() {
+    setActiveToggle(toggleTime);
+    showBarView();
+    // Build spending-over-time data
+    const byDate = {};
+    for (const e of trip.expenses) {
+      byDate[e.date] = (byDate[e.date] || 0) + e.amount;
+    }
+    const bars = Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, amount]) => ({ label: formatShortDate(date), amount }));
+    drawBarChart(barCanvas, bars, trip.currency);
+    exportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-over-time.png`);
+  }
+
+  function showMemberChart() {
+    setActiveToggle(toggleMember);
+    showBarView();
+    // Build per-member data using a single pass over expenses
+    const amountByPayerId = {};
+    for (const e of trip.expenses) {
+      amountByPayerId[e.paidBy] = (amountByPayerId[e.paidBy] || 0) + e.amount;
+    }
+    const bars = trip.participants.map((p, i) => ({
+      name: p.name,
+      amount: amountByPayerId[p.id] || 0,
+      color: PIE_COLORS[i % PIE_COLORS.length],
+    })).filter((b) => b.amount > 0).sort((a, b) => b.amount - a.amount);
+    drawHorizontalBarChart(barCanvas, bars, trip.currency);
+    exportBtn.onclick = () => exportCanvasPng(barCanvas, `banana-splitt-${sanitizeFilename(trip.name)}-by-member.png`);
   }
 
   togglePayer.addEventListener('click', showPayerChart);
   toggleCat.addEventListener('click', showCategoryChart);
+  toggleTime.addEventListener('click', showTimeChart);
+  toggleMember.addEventListener('click', showMemberChart);
 
   showPayerChart();
 }
@@ -767,6 +826,179 @@ function renderChartLegend(container, slices, total, currency) {
     `;
     container.appendChild(div);
   });
+}
+
+// ---- Analytics charts ----
+
+function formatShortDate(isoDate) {
+  // isoDate is 'YYYY-MM-DD'
+  const parts = isoDate ? isoDate.split('-') : [];
+  if (parts.length !== 3) return isoDate || '';
+  const [, m, d] = parts;
+  // Use Intl.DateTimeFormat formatToParts to reliably detect day-first vs month-first
+  const locale = navigator.language || 'en';
+  const testDate = new Date(2013, 0, 2); // Jan 2 — unambiguous day vs month
+  const formatter = new Intl.DateTimeFormat(locale, { month: '2-digit', day: '2-digit' });
+  const dateParts = typeof formatter.formatToParts === 'function'
+    ? formatter.formatToParts(testDate)
+    : [];
+  const dayIndex = dateParts.findIndex((p) => p.type === 'day');
+  const monthIndex = dateParts.findIndex((p) => p.type === 'month');
+  const dayFirst = dayIndex !== -1 && monthIndex !== -1 ? dayIndex < monthIndex : false;
+  return dayFirst ? `${d}/${m}` : `${m}/${d}`;
+}
+
+function drawBarChart(canvas, bars, currency) {
+  if (!bars || bars.length === 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  const barGap    = 4;
+  const minBarW   = 20;
+  const padTop    = 16;
+  const padBottom = 36;
+  const padLeft   = 12;
+  const padRight  = 12;
+  const H = 200;
+  // Expand canvas width if needed to maintain minimum bar width.
+  // Layout: gap | bar | gap | bar | ... | bar | gap  → n bars with (n+1) gaps
+  const n = bars.length;
+  const minW = padLeft + padRight + barGap * (n + 1) + minBarW * n;
+  const W = Math.max(500, minW);
+  const chartW    = W - padLeft - padRight;
+  const chartH    = H - padTop - padBottom;
+
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const maxAmount = Math.max(...bars.map((b) => b.amount));
+  if (maxAmount === 0) return;
+
+  const barW = Math.floor((chartW - barGap * (n + 1)) / n);
+
+  // Gridlines
+  const gridLines = 4;
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = padTop + chartH - (i / gridLines) * chartH;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(W - padRight, y);
+    ctx.stroke();
+  }
+
+  // Bars
+  bars.forEach((bar, i) => {
+    const x = padLeft + barGap + i * (barW + barGap);
+    const barHeight = (bar.amount / maxAmount) * chartH;
+    const y = padTop + chartH - barHeight;
+
+    ctx.fillStyle = PIE_COLORS[0];
+    const r = Math.min(4, barW / 2);
+    ctx.beginPath();
+    ctx.moveTo(x, y + barHeight);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.lineTo(x + barW - r, y);
+    ctx.arcTo(x + barW, y, x + barW, y + r, r);
+    ctx.lineTo(x + barW, y + barHeight);
+    ctx.closePath();
+    ctx.fill();
+
+    // X-axis label
+    ctx.fillStyle = '#6b7280';
+    ctx.font = `600 ${Math.min(11, Math.max(9, barW - 2))}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(bar.label, x + barW / 2, padTop + chartH + 6);
+  });
+}
+
+function drawHorizontalBarChart(canvas, bars, currency) {
+  if (!bars || bars.length === 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W   = 400;
+  const rowH = 40;
+  const H   = bars.length * rowH + 40;
+
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const nameW   = 90;
+  const amtW    = 80;
+  const padV    = 8;
+  const barAreaW = W - nameW - amtW - 16;
+
+  const maxAmount = Math.max(...bars.map((b) => b.amount));
+
+  bars.forEach((bar, i) => {
+    const y = 20 + i * rowH;
+
+    // Bar geometry — computed first so name/amount labels can share the same y-centre
+    const barH   = rowH - padV * 2;
+    const barLen = maxAmount > 0 ? (bar.amount / maxAmount) * barAreaW : 0;
+    const bx     = nameW + 4;
+    const by     = y + padV;
+    const r      = Math.min(4, barH / 2);
+
+    // Member name
+    ctx.fillStyle = '#111827';
+    ctx.font = '600 12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    // Truncate long names
+    let name = bar.name;
+    while (name.length > 1 && ctx.measureText(name).width > nameW - 8) {
+      name = name.slice(0, -1);
+    }
+    if (name !== bar.name) name += '…';
+    ctx.fillText(name, nameW - 4, by + barH / 2);
+
+    // Bar
+    ctx.fillStyle = (/^#[0-9a-fA-F]{3,8}$/.test(bar.color) ? bar.color : null) || PIE_COLORS[i % PIE_COLORS.length];
+    if (barLen > 0) {
+      const effectiveR = Math.min(r, barLen / 2);
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + barLen - effectiveR, by);
+      ctx.arcTo(bx + barLen, by, bx + barLen, by + effectiveR, effectiveR);
+      ctx.lineTo(bx + barLen, by + barH - effectiveR);
+      ctx.arcTo(bx + barLen, by + barH, bx + barLen - effectiveR, by + barH, effectiveR);
+      ctx.lineTo(bx, by + barH);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Amount label
+    ctx.fillStyle = '#111827';
+    ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    let amtStr;
+    try { amtStr = fmt(bar.amount, currency); } catch { amtStr = String(bar.amount); }
+    ctx.fillText(amtStr, nameW + 4 + barAreaW + amtW - 4, by + barH / 2);
+  });
+}
+
+function sanitizeFilename(name) {
+  const safe = (name || 'trip').replace(/[^a-z0-9-]+/gi, '-').toLowerCase().replace(/^-|-$/g, '');
+  return safe || 'trip';
+}
+
+function exportCanvasPng(canvas, filename) {
+  const link = document.createElement('a');
+  link.download = filename || 'chart.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
 }
 
 // ---- Balances tab ----
