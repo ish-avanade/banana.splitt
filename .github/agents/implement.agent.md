@@ -55,7 +55,7 @@ hooks:
       action: |
         1. Capture test output diagnostics (prefer last 50 lines of npm test output).
         2. If test output is empty, use captured stderr/error messages from the failed attempt.
-        3. Create .github/issues/NNN-debug-<timestamp>.md using UTC timestamp format YYYYMMDD-HHmmss (24-hour clock).
+        3. Create .github/issues/NNN-debug-<timestamp>.md using UTC timestamp format YYYYMMDD-HHmmss (24-hour clock), e.g. 20260416-143022.
         4. Write the debug issue with:
            - Type: bug
            - Title: Debug: issue NNN implementation failed
