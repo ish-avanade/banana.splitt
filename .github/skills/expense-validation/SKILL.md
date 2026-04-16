@@ -41,14 +41,25 @@ e.description.toLowerCase().includes(descLower)
 | Currency selector | `#exp-currency` | The expense's currency (may differ from `trip.currency`) |
 | Conversion preview | `#conversion-preview` | Text label showing the converted amount |
 
-The variable `lastConvertedAmount` (declared in the closure of `attachExpenseFormHandlers`) holds the most recently computed converted value (number) from `updateConversionPreview`. It is `null` when no conversion has run yet.
+The variable `lastConvertedAmount` (declared in the closure of `attachExpenseFormHandlers`) holds the most recently computed converted value (number) from `updateConversionPreview`. It is `null` when no conversion has run yet, but is initialized from `expense.convertedAmount` when editing a foreign-currency expense so that `runChecks` has a correct value before the user triggers a live fetch.
+
+`updateConversionPreview` always calls `runChecks()` on completion (success or failure) to keep the warning banner in sync with the latest converted amount.
 
 ```js
-// Derive the trip-currency comparable amount
-const expCurrency = document.getElementById('exp-currency').value;
-const compareAmount = (expCurrency && expCurrency !== trip.currency && lastConvertedAmount !== null)
-  ? lastConvertedAmount
-  : amount;
+// Derive the trip-currency comparable amount — fallback chain:
+// live conversion → saved expense conversion → raw input amount
+const isForeignCurrency = expCurrency && expCurrency !== trip.currency;
+const savedConvertedAmount = expense && typeof expense.convertedAmount === 'number'
+  ? expense.convertedAmount
+  : null;
+let compareAmount = amount;
+if (isForeignCurrency) {
+  if (lastConvertedAmount !== null) {
+    compareAmount = lastConvertedAmount;
+  } else if (savedConvertedAmount !== null) {
+    compareAmount = savedConvertedAmount;
+  }
+}
 ```
 
 Use `compareAmount` (not raw `amount`) on **both sides** of:

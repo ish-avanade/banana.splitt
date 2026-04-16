@@ -1448,6 +1448,8 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       lastConvertedAmount = null;
       preview.textContent = 'Could not fetch rate — will use 1:1';
     }
+    // Re-run duplicate/anomaly checks now that lastConvertedAmount is up to date
+    runChecks();
   }
 
   function schedulePreviewUpdate() {
@@ -1466,6 +1468,9 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       ? (expense.convertedAmount / expense.originalAmount).toFixed(4)
       : '1.0000';
     preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
+    // Initialise lastConvertedAmount so runChecks can use the correct trip-currency amount
+    // before the user triggers a live rate fetch
+    lastConvertedAmount = expense.convertedAmount;
   }
 
   // Duplicate & anomaly detection — cache stable DOM refs once
@@ -1485,11 +1490,21 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
-    // Use the trip-currency amount for comparisons (post-conversion when a foreign currency is selected)
+    // Use the trip-currency amount for comparisons (post-conversion when a foreign currency is selected).
+    // Fallback chain: live conversion → saved expense conversion → raw input amount.
     const expCurrency = document.getElementById('exp-currency').value;
-    const compareAmount = (expCurrency && expCurrency !== trip.currency && lastConvertedAmount !== null)
-      ? lastConvertedAmount
-      : amount;
+    const isForeignCurrency = expCurrency && expCurrency !== trip.currency;
+    const savedConvertedAmount = expense && typeof expense.convertedAmount === 'number'
+      ? expense.convertedAmount
+      : null;
+    let compareAmount = amount;
+    if (isForeignCurrency) {
+      if (lastConvertedAmount !== null) {
+        compareAmount = lastConvertedAmount;
+      } else if (savedConvertedAmount !== null) {
+        compareAmount = savedConvertedAmount;
+      }
+    }
 
     const comparisons = expense
       ? trip.expenses.filter((e) => e.id !== expense.id)
