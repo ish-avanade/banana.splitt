@@ -2010,7 +2010,7 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
               }
               fxRateCache.set(rateCacheKey, rate);
             }
-            amount = Math.round(amount * rate * 100) / 100;
+            amount = Math.round(Number(expenseLike.amount) * rate * 100) / 100;
             convertedAmountCache.set(expenseLike, amount);
           }
           extraFields.originalCurrency = expenseCurrency;
