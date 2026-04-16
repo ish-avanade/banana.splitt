@@ -44,24 +44,31 @@ hooks:
     - name: update_issue_status
       description: "Mark acceptance criteria complete only when implementation validation succeeded."
       action: |
-        If npm test was run and exited with code 0, update all unchecked acceptance criteria
-        in the local issue file from "- [ ]" to "- [x]".
+        If npm test was run and exited with code 0, only update acceptance criteria explicitly
+        marked for automation from "- [ ] [auto] ..." to "- [x] [auto] ...".
+        Leave all other acceptance criteria unchanged for explicit manual verification.
         If tests were not run, do not apply this hook and leave checkboxes unchanged.
         If tests ran but failed, do not modify checkboxes.
     - name: create_followup_if_needed
       description: "Create a follow-up issue when implementation hints request additional skill documentation work."
       action: |
         If the issue Implementation Hints mention creating a SKILL.md or documenting a skill:
-        Create a new issue markdown file under .github/issues/ for the documentation follow-up.
-        Title it as a documentation task linked to the original issue and include clear next steps.
+        1. Scan .github/issues/ for existing files matching the standard issue pattern NNN-slug.md
+           (equivalent glob: [0-9][0-9][0-9]-*.md) and find the next available zero-padded
+           three-digit issue number (NNN).
+        2. Generate a slug from the follow-up title and create .github/issues/NNN-<slug>.md.
+        3. If a filename collision occurs, append a short suffix to keep the filename unique.
+        4. Include a title and body that link back to the original issue with clear next steps.
   onFailure:
     - name: create_debug_issue
       description: "Create a timestamped debug issue with diagnostics when implementation fails."
       action: |
         1. Capture test output diagnostics (prefer last 50 lines of npm test output).
         2. If test output is empty, use captured stderr/error messages from the failed attempt.
-        3. Create .github/issues/NNN-debug-<timestamp>.md using UTC timestamp format YYYYMMDD-HHmmss (24-hour clock), e.g. 20260416-143022.
-        4. Write the debug issue with:
+        3. Create .github/issues/debug/ if it does not exist.
+        4. Create .github/issues/debug/debug-<timestamp>-issue-NNN.md using UTC timestamp format
+           YYYYMMDD-HHmmss (24-hour clock), e.g. debug-20260416-143022-issue-001.md.
+        5. Write the debug issue with:
            - Type: bug
            - Title: Debug: issue NNN implementation failed
            - Original issue reference
