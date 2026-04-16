@@ -535,8 +535,37 @@ function renderExpensesTab(trip, tripId) {
     renderedItemsById.set(expense.id, item);
   }
 
+  const expensesByDate = new Map();
   for (const expense of sorted) {
-    const dup = findDuplicate(expense, sorted, { excludeId: expense.id });
+    const amount = Number(expense.amount);
+    if (!expense.date || !Number.isFinite(amount) || amount <= 0) continue;
+    if (!expensesByDate.has(expense.date)) expensesByDate.set(expense.date, []);
+    expensesByDate.get(expense.date).push(expense);
+  }
+  for (const sameDateExpenses of expensesByDate.values()) {
+    sameDateExpenses.sort((a, b) => Number(a.amount) - Number(b.amount));
+  }
+  const lowerBoundByAmount = (arr, target) => {
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Number(arr[mid].amount) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  for (const expense of sorted) {
+    const amount = Number(expense.amount);
+    const sameDateExpenses = expensesByDate.get(expense.date);
+    if (!sameDateExpenses || sameDateExpenses.length < 2 || !Number.isFinite(amount) || amount <= 0) continue;
+    const minAmount = amount * 0.95;
+    const maxAmount = amount / 0.95;
+    const start = lowerBoundByAmount(sameDateExpenses, minAmount);
+    const end = lowerBoundByAmount(sameDateExpenses, maxAmount);
+    const candidates = sameDateExpenses.slice(start, end);
+    const dup = findDuplicate(expense, candidates, { excludeId: expense.id });
     if (!dup) continue;
     const item = renderedItemsById.get(expense.id);
     if (!item) continue;
