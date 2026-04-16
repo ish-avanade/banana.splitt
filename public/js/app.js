@@ -1979,6 +1979,8 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
     btn.disabled = true;
     btn.textContent = '…';
     try {
+      const convertedAmountCache = new WeakMap();
+
       async function getComparableAmountAndFields(expenseLike) {
         const expenseCurrency = (expenseLike.currency && /^[A-Z]{3}$/.test(expenseLike.currency))
           ? expenseLike.currency
@@ -1988,8 +1990,8 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
         const extraFields = {};
 
         if (needsConversion) {
-          if (typeof expenseLike._tripComparableAmount === 'number') {
-            amount = expenseLike._tripComparableAmount;
+          if (convertedAmountCache.has(expenseLike)) {
+            amount = convertedAmountCache.get(expenseLike);
           } else {
             const date = expenseLike.date || new Date().toISOString().split('T')[0];
             const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
@@ -2004,13 +2006,13 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
               throw new Error(`Could not convert ${expenseCurrency} to ${trip.currency}`);
             }
             amount = Math.round(converted * 100) / 100;
-            expenseLike._tripComparableAmount = amount;
+            convertedAmountCache.set(expenseLike, amount);
           }
           extraFields.originalCurrency = expenseCurrency;
           extraFields.originalAmount   = expenseLike.amount;
           extraFields.convertedAmount  = amount;
         } else if (Number.isFinite(amount)) {
-          expenseLike._tripComparableAmount = amount;
+          convertedAmountCache.set(expenseLike, amount);
         }
 
         return { amount, extraFields };
@@ -2018,11 +2020,11 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
 
       const { amount, extraFields } = await getComparableAmountAndFields(parsed);
       const comparisons = [...trip.expenses];
-      for (const peer of aiBatchExpenses) {
+      for (const [peerIndex, peer] of aiBatchExpenses.entries()) {
         if (peer === parsed) continue;
         const { amount: peerAmount } = await getComparableAmountAndFields(peer);
         comparisons.push({
-          id: `ai-${peer.paidBy || 'unknown'}-${peer.description || ''}-${peer.date || ''}-${peerAmount}`,
+          id: `ai-${peerIndex}`,
           amount: peerAmount,
           description: peer.description || '',
           date: peer.date || '',
@@ -2039,8 +2041,8 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
           warning.className = 'ai-dup-warning';
           card.querySelector('.ai-expense-card-actions').before(warning);
         }
-        warning.textContent =
-          `⚠️ This looks similar to "${dup.description}" (${fmt(dup.amount, trip.currency)}) added on ${dup.date}`;
+        warning.innerHTML =
+          `⚠️ This looks similar to "${escHtml(dup.description)}" (${escHtml(fmt(dup.amount, trip.currency))}) added on ${escHtml(dup.date)}`;
         card.dataset.dupDismissed = 'true';
         btn.disabled = false;
         btn.textContent = 'Add Anyway';
