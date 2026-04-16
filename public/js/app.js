@@ -1818,26 +1818,87 @@ async function confirmDeleteExpense(trip, expense, onSuccess) {
 
 function showAddMemberModal(trip, onSuccess) {
   openModal(`
-    <h2 class="modal-title">Add Member</h2>
+    <h2 class="modal-title">Add Members</h2>
     <form id="add-member-form">
       <div class="form-group">
-        <label for="member-name">Name *</label>
-        <input id="member-name" type="text" placeholder="e.g. Alice" required maxlength="60" />
+        <label>Names *</label>
+        <div id="member-rows"></div>
+        <button type="button" class="btn btn-link" id="add-another-row" style="align-self:flex-start;padding:0;margin-top:.25rem;font-size:.85rem">+ Add another</button>
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
-        <button type="submit" class="btn btn-primary">Add Member</button>
+        <button type="submit" class="btn btn-primary">Add Members</button>
       </div>
     </form>
   `);
+
+  const rowsContainer = document.getElementById('member-rows');
+
+  function addRow(value = '') {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:.35rem;align-items:center;margin-bottom:.35rem';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'e.g. Alice';
+    input.maxLength = 60;
+    input.value = value;
+    input.style.flex = '1';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addRow(); }
+    });
+    row.appendChild(input);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.style.cssText = 'background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted);padding:0 .25rem';
+    removeBtn.addEventListener('click', () => {
+      if (rowsContainer.children.length > 1) row.remove();
+    });
+    row.appendChild(removeBtn);
+    rowsContainer.appendChild(row);
+    input.focus();
+  }
+
+  addRow();
+  document.getElementById('add-another-row').addEventListener('click', () => addRow());
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
   document.getElementById('add-member-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = document.getElementById('member-name').value.trim();
+    const inputs = rowsContainer.querySelectorAll('input');
+    const names = [...inputs].map(i => i.value.trim()).filter(Boolean);
+    // Deduplicate within batch (case-insensitive, keep first occurrence)
+    const seen = new Set();
+    const unique = [];
+    for (const n of names) {
+      const key = n.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); unique.push(n); }
+    }
+    // Filter out existing participants
+    const existing = new Set(trip.participants.map(p => p.name.toLowerCase()));
+    const dupes = unique.filter(n => existing.has(n.toLowerCase()));
+    const toAdd = unique.filter(n => !existing.has(n.toLowerCase()));
+
+    if (toAdd.length === 0 && dupes.length === 0) {
+      toast('Enter at least one name', 'error');
+      return;
+    }
+    if (dupes.length > 0) {
+      toast(`Skipped duplicate${dupes.length > 1 ? 's' : ''}: ${dupes.map(d => escHtml(d)).join(', ')}`, 'warning');
+    }
+    if (toAdd.length === 0) return;
+
     try {
-      await post(`/trips/${trip.id}/participants`, { name });
+      for (const name of toAdd) {
+        await post(`/trips/${trip.id}/participants`, { name });
+      }
       closeModal();
-      toast(`${name} added 👋`, 'success');
+      if (toAdd.length === 1) {
+        toast(`${escHtml(toAdd[0])} added 👋`, 'success');
+      } else {
+        toast(`${toAdd.length} members added 👋`, 'success');
+      }
       onSuccess();
     } catch (err) {
       toast(err.message, 'error');
