@@ -252,6 +252,16 @@ main#main-content {
 .expense-body { flex: 1; min-width: 0; }
 .expense-desc { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .expense-meta { font-size: .78rem; color: var(--text-muted); margin-top: .1rem; }
+.duplicate-badge {
+  display: inline-block;
+  margin-top: .4rem;
+  padding: .15rem .5rem;
+  border-radius: 4px;
+  background: var(--yellow-light);
+  color: #92400e;
+  font-size: .75rem;
+  font-weight: 600;
+}
 .expense-amount { font-size: 1.15rem; font-weight: 800; text-align: right; min-width: 70px; }
 .expense-amount .conversion-note { display: block; font-size: .75rem; font-weight: 500; color: var(--text-muted); }
 .expense-actions { display: flex; gap: .25rem; }
@@ -820,6 +830,15 @@ main#main-content {
   white-space: nowrap;
 }
 .ai-expense-card-actions { display: flex; gap: .4rem; }
+.ai-dup-warning {
+  background: var(--yellow-light);
+  border: 1px solid var(--yellow);
+  border-radius: 6px;
+  padding: .35rem .55rem;
+  margin-top: .4rem;
+  font-size: .78rem;
+  color: #92400e;
+}
 .ai-currency-warning {
   display: inline-block;
   background: #fef3c7;
