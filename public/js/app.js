@@ -1448,6 +1448,8 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       lastConvertedAmount = null;
       preview.textContent = 'Could not fetch rate — will use 1:1';
     }
+    // Re-run duplicate/anomaly checks now that lastConvertedAmount is up to date
+    runChecks();
   }
 
   function schedulePreviewUpdate() {
@@ -1466,6 +1468,9 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       ? (expense.convertedAmount / expense.originalAmount).toFixed(4)
       : '1.0000';
     preview.textContent = `≈ ${fmt(expense.convertedAmount, trip.currency)} at ${rate} rate`;
+    // Initialise lastConvertedAmount so runChecks can use the correct trip-currency amount
+    // before the user triggers a live rate fetch
+    lastConvertedAmount = expense.convertedAmount;
   }
 
   // Duplicate & anomaly detection — cache stable DOM refs once
@@ -1485,18 +1490,35 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       return;
     }
 
+    // Use the trip-currency amount for comparisons (post-conversion when a foreign currency is selected).
+    // Fallback chain: live conversion → saved expense conversion → raw input amount.
+    const expCurrency = document.getElementById('exp-currency').value;
+    const isForeignCurrency = expCurrency && expCurrency !== trip.currency;
+    const savedConvertedAmount = expense && typeof expense.convertedAmount === 'number'
+      ? expense.convertedAmount
+      : null;
+    let compareAmount = amount;
+    if (isForeignCurrency) {
+      if (lastConvertedAmount !== null) {
+        compareAmount = lastConvertedAmount;
+      } else if (savedConvertedAmount !== null) {
+        compareAmount = savedConvertedAmount;
+      }
+    }
+
     const comparisons = expense
       ? trip.expenses.filter((e) => e.id !== expense.id)
       : trip.expenses;
 
-    // Duplicate check: same amount ±5%, same date, description substring match
+    // Duplicate check: same amount ±5%, same date, bidirectional description substring match
     if (desc.length > 0) {
       const descLower = desc.toLowerCase();
       const dup = comparisons.find((e) =>
         e.amount > 0 &&
-        Math.abs(e.amount - amount) / Math.max(e.amount, amount) < 0.05 &&
+        Math.abs(e.amount - compareAmount) / Math.max(e.amount, compareAmount) < 0.05 &&
         e.date === date &&
-        e.description.toLowerCase().includes(descLower)
+        (e.description.toLowerCase().includes(descLower) ||
+         descLower.includes(e.description.toLowerCase()))
       );
       if (dup) {
         warningTextEl.textContent =
@@ -1506,10 +1528,10 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
       }
     }
 
-    // Anomaly check: amount > 5× average of existing expenses
+    // Anomaly check: compareAmount > 5× average of existing expenses (trip-currency amounts)
     if (comparisons.length > 0) {
       const avg = comparisons.reduce((s, e) => s + e.amount, 0) / comparisons.length;
-      if (amount > avg * 5) {
+      if (compareAmount > avg * 5) {
         warningTextEl.textContent =
           `⚠️ This is much larger than your average expense (${fmt(avg, trip.currency)}). Double-check the amount.`;
         warningEl.classList.remove('hidden');
