@@ -2,7 +2,7 @@
 
 > Split trip expenses with your group — multi-currency, AI-powered, no sign-up required.
 
-> Run `npm run dev` and open http://localhost:3000 to see the app in action.
+> Run `npm run dev` and visit http://localhost:3000 to explore the app.
 
 ## Features
 
