@@ -545,7 +545,9 @@ function renderExpensesTab(trip, tripId) {
   for (const sameDateExpenses of expensesByDate.values()) {
     sameDateExpenses.sort((a, b) => Number(a.amount) - Number(b.amount));
   }
-  const lowerBoundByAmount = (arr, target) => {
+  const DUPLICATE_MIN_AMOUNT_FACTOR = 0.95;
+  const DUPLICATE_MAX_AMOUNT_FACTOR = 1 / DUPLICATE_MIN_AMOUNT_FACTOR;
+  const firstIndexAtOrAboveAmount = (arr, target) => {
     let lo = 0;
     let hi = arr.length;
     while (lo < hi) {
@@ -558,12 +560,13 @@ function renderExpensesTab(trip, tripId) {
 
   for (const expense of sorted) {
     const amount = Number(expense.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || !expense.date) continue;
     const sameDateExpenses = expensesByDate.get(expense.date);
-    if (!sameDateExpenses || sameDateExpenses.length < 2 || !Number.isFinite(amount) || amount <= 0) continue;
-    const minAmount = amount * 0.95;
-    const maxAmount = amount / 0.95;
-    const start = lowerBoundByAmount(sameDateExpenses, minAmount);
-    const end = lowerBoundByAmount(sameDateExpenses, maxAmount);
+    if (!sameDateExpenses || sameDateExpenses.length < 2) continue;
+    const minAmount = amount * DUPLICATE_MIN_AMOUNT_FACTOR;
+    const maxAmount = amount * DUPLICATE_MAX_AMOUNT_FACTOR;
+    const start = firstIndexAtOrAboveAmount(sameDateExpenses, minAmount);
+    const end = firstIndexAtOrAboveAmount(sameDateExpenses, maxAmount);
     const candidates = sameDateExpenses.slice(start, end);
     const dup = findDuplicate(expense, candidates, { excludeId: expense.id });
     if (!dup) continue;
