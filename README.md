@@ -166,6 +166,16 @@ Use `@implement` in Copilot Chat to pick up and build an issue end-to-end.
 | `--local` (default) | Implements the issue in your VS Code workspace (edits files, runs tests) |
 | `--cloud` | Pushes the issue to GitHub and assigns Copilot's cloud agent to handle it |
 
+### Debug issue artifacts
+
+`@implement` still works the same for normal issue specs in `.github/issues/NNN-slug.md`.
+
+When a run fails and writes diagnostics, debug artifacts are now stored separately under:
+
+`.github/issues/debug/debug-<timestamp>-issue-NNN.md`
+
+This keeps `NNN` prefix matching for normal issue execution unambiguous while preserving debug files for investigation.
+
 ### Pushing Issues to GitHub
 
 Use `/push-issues` to bulk-push local issue specs to GitHub Issues assigned to Copilot.
