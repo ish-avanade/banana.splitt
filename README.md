@@ -2,14 +2,7 @@
 
 > Split trip expenses with your group — multi-currency, AI-powered, no sign-up required.
 
-## Screenshots
-
-![Home — trip list](docs/screenshots/home.png)
-![Trip detail — expense list](docs/screenshots/trip-expenses.png)
-![Balances tab — dashboard, donut chart & settlements](docs/screenshots/trip-balances.png)
-![AI chat bar — parsed expense card](docs/screenshots/ai-chat.png)
-![Expense with foreign currency conversion](docs/screenshots/currency-conversion.png)
-![Budget forecast card](docs/screenshots/budget-forecast.png)
+> Run `npm run dev` and open http://localhost:3000 to see the app in action.
 
 ## Features
 
