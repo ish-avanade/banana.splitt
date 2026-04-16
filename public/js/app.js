@@ -120,6 +120,26 @@ function fmt(amount, currency) {
   }).format(amount);
 }
 
+function findDuplicate(candidate, expenses, opts = {}) {
+  const { excludeId = null } = opts;
+  const amount = Number(candidate?.amount);
+  const date = candidate?.date || '';
+  const descLower = (candidate?.description || '').trim().toLowerCase();
+  if (!descLower || !Number.isFinite(amount) || amount <= 0 || !date) return null;
+
+  return expenses.find((e) => {
+    if (excludeId !== null && e.id === excludeId) return false;
+    const existingAmount = Number(e.amount);
+    const existingDesc = (e.description || '').toLowerCase();
+    if (!Number.isFinite(existingAmount) || existingAmount <= 0 || !existingDesc) return false;
+    return (
+      Math.abs(existingAmount - amount) / Math.max(existingAmount, amount) < 0.05 &&
+      e.date === date &&
+      (existingDesc.includes(descLower) || descLower.includes(existingDesc))
+    );
+  }) || null;
+}
+
 function initials(name) {
   return (name || '?')
     .split(' ')
@@ -455,6 +475,7 @@ function renderExpensesTab(trip, tripId) {
 
   // Sort by date desc
   const sorted = [...trip.expenses].sort((a, b) => b.date.localeCompare(a.date));
+  const renderedItemsById = new Map();
   for (const expense of sorted) {
     const payer = trip.participants.find((p) => p.id === expense.paidBy);
     const splitNames = expense.splitBetween
@@ -511,6 +532,20 @@ function renderExpensesTab(trip, tripId) {
       confirmDeleteExpense(trip, expense, () => renderTripDetail(tripId))
     );
     list.appendChild(item);
+    renderedItemsById.set(expense.id, item);
+  }
+
+  for (const expense of sorted) {
+    const dup = findDuplicate(expense, sorted, { excludeId: expense.id });
+    if (!dup) continue;
+    const item = renderedItemsById.get(expense.id);
+    if (!item) continue;
+    const body = item.querySelector('.expense-body');
+    if (!body) continue;
+    const badge = document.createElement('div');
+    badge.className = 'duplicate-badge';
+    badge.innerHTML = `⚠️ Possible duplicate of "${escHtml(dup.description)}" (${escHtml(fmt(dup.amount, trip.currency))})`;
+    body.appendChild(badge);
   }
 }
 
@@ -1512,14 +1547,7 @@ function attachExpenseFormHandlers(trip, expense, onSuccess) {
 
     // Duplicate check: same amount ±5%, same date, bidirectional description substring match
     if (desc.length > 0) {
-      const descLower = desc.toLowerCase();
-      const dup = comparisons.find((e) =>
-        e.amount > 0 &&
-        Math.abs(e.amount - compareAmount) / Math.max(e.amount, compareAmount) < 0.05 &&
-        e.date === date &&
-        (e.description.toLowerCase().includes(descLower) ||
-         descLower.includes(e.description.toLowerCase()))
-      );
+      const dup = findDuplicate({ description: desc, amount: compareAmount, date }, comparisons);
       if (dup) {
         warningTextEl.textContent =
           `⚠️ This looks similar to "${dup.description}" (${fmt(dup.amount, trip.currency)}) added on ${dup.date}`;
@@ -1902,7 +1930,7 @@ async function initAiChat(trip, tripId) {
 
       input.value = '';
       for (const expense of expenses) {
-        results.appendChild(renderAiExpenseCard(trip, expense, tripId));
+        results.appendChild(renderAiExpenseCard(trip, expense, tripId, expenses));
       }
     } catch {
       toast('Could not parse the message — try the form instead.', 'error');
@@ -1913,7 +1941,7 @@ async function initAiChat(trip, tripId) {
   });
 }
 
-function renderAiExpenseCard(trip, parsed, tripId) {
+function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
   const card = document.createElement('div');
   card.className = 'ai-expense-card';
 
@@ -1951,27 +1979,72 @@ function renderAiExpenseCard(trip, parsed, tripId) {
     btn.disabled = true;
     btn.textContent = '…';
     try {
-      let amount = parsed.amount;
-      const extraFields = {};
+      async function getComparableAmountAndFields(expenseLike) {
+        const expenseCurrency = (expenseLike.currency && /^[A-Z]{3}$/.test(expenseLike.currency))
+          ? expenseLike.currency
+          : null;
+        const needsConversion = expenseCurrency && expenseCurrency !== trip.currency;
+        let amount = Number(expenseLike.amount);
+        const extraFields = {};
 
-      if (currencyMismatch) {
-        const date = parsed.date || new Date().toISOString().split('T')[0];
-        const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
-        convUrl.searchParams.set('from', parsedCurrency);
-        convUrl.searchParams.set('to', trip.currency);
-        convUrl.searchParams.set('amount', String(parsed.amount));
-        const convRes = await fetch(convUrl);
-        if (!convRes.ok) throw new Error('Could not fetch currency conversion');
-        const convData = await convRes.json();
-        const converted = convData.rates?.[trip.currency];
-        if (typeof converted !== 'number' || !Number.isFinite(converted)) {
-          throw new Error(`Could not convert ${parsedCurrency} to ${trip.currency}`);
+        if (needsConversion) {
+          if (typeof expenseLike._tripComparableAmount === 'number') {
+            amount = expenseLike._tripComparableAmount;
+          } else {
+            const date = expenseLike.date || new Date().toISOString().split('T')[0];
+            const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
+            convUrl.searchParams.set('from', expenseCurrency);
+            convUrl.searchParams.set('to', trip.currency);
+            convUrl.searchParams.set('amount', String(expenseLike.amount));
+            const convRes = await fetch(convUrl);
+            if (!convRes.ok) throw new Error('Could not fetch currency conversion');
+            const convData = await convRes.json();
+            const converted = convData.rates?.[trip.currency];
+            if (typeof converted !== 'number' || !Number.isFinite(converted)) {
+              throw new Error(`Could not convert ${expenseCurrency} to ${trip.currency}`);
+            }
+            amount = Math.round(converted * 100) / 100;
+            expenseLike._tripComparableAmount = amount;
+          }
+          extraFields.originalCurrency = expenseCurrency;
+          extraFields.originalAmount   = expenseLike.amount;
+          extraFields.convertedAmount  = amount;
+        } else if (Number.isFinite(amount)) {
+          expenseLike._tripComparableAmount = amount;
         }
-        const convertedAmount = Math.round(converted * 100) / 100;
-        amount = convertedAmount;
-        extraFields.originalCurrency = parsedCurrency;
-        extraFields.originalAmount   = parsed.amount;
-        extraFields.convertedAmount  = convertedAmount;
+
+        return { amount, extraFields };
+      }
+
+      const { amount, extraFields } = await getComparableAmountAndFields(parsed);
+      const comparisons = [...trip.expenses];
+      for (const peer of aiBatchExpenses) {
+        if (peer === parsed) continue;
+        const { amount: peerAmount } = await getComparableAmountAndFields(peer);
+        comparisons.push({
+          id: `ai-${peer.paidBy || 'unknown'}-${peer.description || ''}-${peer.date || ''}-${peerAmount}`,
+          amount: peerAmount,
+          description: peer.description || '',
+          date: peer.date || '',
+        });
+      }
+      const dup = findDuplicate(
+        { description: parsed.description || '', amount, date: parsed.date || '' },
+        comparisons
+      );
+      if (dup && card.dataset.dupDismissed !== 'true') {
+        let warning = card.querySelector('.ai-dup-warning');
+        if (!warning) {
+          warning = document.createElement('div');
+          warning.className = 'ai-dup-warning';
+          card.querySelector('.ai-expense-card-actions').before(warning);
+        }
+        warning.textContent =
+          `⚠️ This looks similar to "${dup.description}" (${fmt(dup.amount, trip.currency)}) added on ${dup.date}`;
+        card.dataset.dupDismissed = 'true';
+        btn.disabled = false;
+        btn.textContent = 'Add Anyway';
+        return;
       }
 
       await post(`/trips/${tripId}/expenses`, {
