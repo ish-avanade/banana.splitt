@@ -1944,6 +1944,7 @@ async function initAiChat(trip, tripId) {
 function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
   const card = document.createElement('div');
   card.className = 'ai-expense-card';
+  const fxRateCache = new Map();
 
   const payerName      = parsed.paidByName || '?';
   const splitNames     = parsed.splitBetweenNames?.join(', ') || '?';
@@ -1994,18 +1995,22 @@ function renderAiExpenseCard(trip, parsed, tripId, aiBatchExpenses = []) {
             amount = convertedAmountCache.get(expenseLike);
           } else {
             const date = expenseLike.date || new Date().toISOString().split('T')[0];
-            const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
-            convUrl.searchParams.set('from', expenseCurrency);
-            convUrl.searchParams.set('to', trip.currency);
-            convUrl.searchParams.set('amount', String(expenseLike.amount));
-            const convRes = await fetch(convUrl);
-            if (!convRes.ok) throw new Error('Could not fetch currency conversion');
-            const convData = await convRes.json();
-            const converted = convData.rates?.[trip.currency];
-            if (typeof converted !== 'number' || !Number.isFinite(converted)) {
-              throw new Error(`Could not convert ${expenseCurrency} to ${trip.currency}`);
+            const rateCacheKey = `${date}:${expenseCurrency}:${trip.currency}`;
+            let rate = fxRateCache.get(rateCacheKey);
+            if (typeof rate !== 'number') {
+              const convUrl = new URL(`https://api.frankfurter.dev/v1/${encodeURIComponent(date)}`);
+              convUrl.searchParams.set('from', expenseCurrency);
+              convUrl.searchParams.set('to', trip.currency);
+              const convRes = await fetch(convUrl);
+              if (!convRes.ok) throw new Error('Could not fetch currency conversion');
+              const convData = await convRes.json();
+              rate = convData.rates?.[trip.currency];
+              if (typeof rate !== 'number' || !Number.isFinite(rate)) {
+                throw new Error(`Could not convert ${expenseCurrency} to ${trip.currency}`);
+              }
+              fxRateCache.set(rateCacheKey, rate);
             }
-            amount = Math.round(converted * 100) / 100;
+            amount = Math.round(amount * rate * 100) / 100;
             convertedAmountCache.set(expenseLike, amount);
           }
           extraFields.originalCurrency = expenseCurrency;
