@@ -39,9 +39,10 @@ hooks:
     - name: update_issue_status
       description: "Mark acceptance criteria complete only when implementation validation succeeded."
       action: |
-        If required tests/checks passed, update all unchecked acceptance criteria
+        If npm test was run and exited with code 0, update all unchecked acceptance criteria
         in the local issue file from "- [ ]" to "- [x]".
-        If tests were not run or failed, do not modify checkboxes.
+        If tests were not run, do not apply this hook and leave checkboxes unchanged.
+        If tests ran but failed, do not modify checkboxes.
     - name: create_followup_if_needed
       description: "Create a follow-up issue when implementation hints request additional skill documentation work."
       action: |
@@ -54,7 +55,8 @@ hooks:
       action: |
         1. Capture test output diagnostics (prefer last 50 lines of npm test output).
         2. If test output is empty, use captured stderr/error messages from the failed attempt.
-        3. Create .github/issues/NNN-debug-<timestamp>.md with:
+        3. Create .github/issues/NNN-debug-<timestamp>.md using UTC timestamp format YYYYMMDD-HHmmss (24-hour clock).
+        4. Write the debug issue with:
            - Type: bug
            - Title: Debug: issue NNN implementation failed
            - Original issue reference
