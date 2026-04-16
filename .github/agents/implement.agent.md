@@ -33,8 +33,13 @@ hooks:
       action: |
         1. Extract issue number NNN from .github/issues/NNN-*.md
         2. Extract issue title from the first # heading in the issue file
-        3. Run git add -A
-        4. Run git commit -m "feat: issue NNN — <issue-title>"
+        3. Extract issue type from the **Type:** field in the issue file
+        4. Derive the commit prefix from the issue type:
+           - bug -> fix:
+           - feature -> feat:
+           - improvement -> feat:
+        5. Run git add -A
+        6. Run git commit -m "<derived-prefix> issue NNN — <issue-title>"
         If commit fails due to no changes or non-git environment, skip without error.
     - name: update_issue_status
       description: "Mark acceptance criteria complete only when implementation validation succeeded."
