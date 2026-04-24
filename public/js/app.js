@@ -133,10 +133,18 @@ function initials(name) {
 const PALETTE = [
   ['#FEF3C7','#78350f'], ['#D1FAE5','#065f46'], ['#DBEAFE','#1e3a8a'],
   ['#FCE7F3','#831843'], ['#EDE9FE','#4c1d95'], ['#FEE2E2','#7f1d1d'],
+  ['#FFEDD5','#7c2d12'], ['#E0F2FE','#0c4a6e'], ['#ECFEFF','#164e63'],
+  ['#F0FDF4','#14532d'], ['#FDF4FF','#581c87'], ['#FFF1F2','#881337'],
+  ['#F5F3FF','#2e1065'], ['#ECFDF5','#064e3b'], ['#FFF7ED','#431407'],
+  ['#F7FEE7','#365314'],
 ];
 function avatarStyle(name) {
-  const idx = (name.charCodeAt(0) || 0) % PALETTE.length;
-  const [bg, color] = PALETTE[idx];
+  const norm = (name || '').trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < norm.length; i++) {
+    hash = (hash * 31 + norm.charCodeAt(i)) >>> 0;
+  }
+  const [bg, color] = PALETTE[hash % PALETTE.length];
   return `background:${bg};color:${color}`;
 }
 
