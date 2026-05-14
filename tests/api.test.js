@@ -6,6 +6,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const jwt = require('jsonwebtoken');
 
 // Use a temp data file so tests don't touch real data
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-'));
@@ -57,7 +58,43 @@ async function req(method, path, body) {
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = text; }
-  return { status: res.status, body: json };
+   return { status: res.status, body: json, headers: res.headers };
+}
+
+function makeTempDataFile() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-auth-'));
+  return { dir, file: path.join(dir, 'trips.json') };
+}
+
+function loadFreshServer(envOverrides = {}) {
+  const envKeys = ['DATA_FILE_OVERRIDE', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
+  const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const tempData = makeTempDataFile();
+
+  process.env.DATA_FILE_OVERRIDE = tempData.file;
+  for (const key of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET']) {
+    if (Object.prototype.hasOwnProperty.call(envOverrides, key)) {
+      process.env[key] = envOverrides[key];
+    } else {
+      delete process.env[key];
+    }
+  }
+
+  const serverPath = require.resolve('../server.js');
+  delete require.cache[serverPath];
+  const loaded = require('../server.js');
+
+  return {
+    ...loaded,
+    cleanup() {
+      delete require.cache[serverPath];
+      for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      try { fs.rmSync(tempData.dir, { recursive: true }); } catch { /* ignore */ }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,5 +665,100 @@ describe('AI parse-expense', () => {
     } finally {
       delete process.env.MOCK_AI_RESPONSE;
     }
+  });
+});
+
+describe('Auth-enabled API', () => {
+  const authCookieName = 'bs_token';
+  const jwtSecret = 'test-jwt-secret';
+  let authServer;
+  let authBaseUrl;
+  let cleanupAuthServer;
+
+  async function authReq(method, reqPath, body, headers = {}) {
+    const url = new URL(authBaseUrl + reqPath);
+    const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
+    const fetchFn = fetch || globalThis.fetch;
+    const res = await fetchFn(url.toString(), {
+      method,
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); } catch { json = text; }
+    return { status: res.status, body: json, headers: res.headers };
+  }
+
+  before(() => {
+    const { app: authApp, cleanup } = loadFreshServer({
+      GITHUB_CLIENT_ID: 'test-client-id',
+      GITHUB_CLIENT_SECRET: 'test-client-secret',
+      JWT_SECRET: jwtSecret,
+    });
+    cleanupAuthServer = cleanup;
+
+    return new Promise((resolve) => {
+      authServer = http.createServer(authApp);
+      authServer.listen(0, '127.0.0.1', () => {
+        const { port } = authServer.address();
+        authBaseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+  });
+
+  after(() => {
+    return new Promise((resolve) => {
+      authServer.close(() => {
+        cleanupAuthServer();
+        resolve();
+      });
+    });
+  });
+
+  it('GET /auth/me reports auth enabled and unauthenticated without a cookie', async () => {
+    const { status, body } = await authReq('GET', '/auth/me');
+    assert.equal(status, 200);
+    assert.equal(body.authEnabled, true);
+    assert.equal(body.authenticated, false);
+    assert.equal(body.clientId, 'test-client-id');
+  });
+
+  it('GET /api/trips returns 401 without an auth cookie when auth is enabled', async () => {
+    const { status, body } = await authReq('GET', '/api/trips');
+    assert.equal(status, 401);
+    assert.equal(body.error, 'Not authenticated');
+  });
+
+  it('GET /api/trips returns 200 with a valid JWT auth cookie when auth is enabled', async () => {
+    const token = jwt.sign({
+      id: 'user-1',
+      login: 'octocat',
+      name: 'Octo Cat',
+      avatar: 'https://example.com/avatar.png',
+    }, jwtSecret, { expiresIn: '1h' });
+
+    const { status, body } = await authReq('GET', '/api/trips', undefined, {
+      Cookie: `${authCookieName}=${encodeURIComponent(token)}`,
+    });
+
+    assert.equal(status, 200);
+    assert.deepEqual(body, []);
+  });
+
+  it('POST /auth/logout clears the auth cookie', async () => {
+    const { status, body, headers } = await authReq('POST', '/auth/logout');
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true });
+    const setCookie = headers.get('set-cookie');
+    assert.ok(setCookie);
+    assert.match(setCookie, /bs_token=;/);
+  });
+
+  it('GET /auth/github/callback returns 400 when code is missing', async () => {
+    const { status, body } = await authReq('GET', '/auth/github/callback');
+    assert.equal(status, 400);
+    assert.equal(body, 'Missing code parameter');
   });
 });
