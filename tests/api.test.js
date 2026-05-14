@@ -42,11 +42,11 @@ after(() => {
   });
 });
 
-async function req(method, path, body) {
-  const url = new URL(baseUrl + path);
+async function doReq(base, method, path, body, headers = {}) {
+  const url = new URL(base + path);
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   };
   const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
   // Fall back to native fetch (Node 18+)
@@ -58,11 +58,15 @@ async function req(method, path, body) {
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = text; }
-   return { status: res.status, body: json, headers: res.headers };
+  return { status: res.status, body: json, headers: res.headers };
+}
+
+async function req(method, path, body, headers = {}) {
+  return doReq(baseUrl, method, path, body, headers);
 }
 
 function makeTempDataFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-auth-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-test-'));
   return { dir, file: path.join(dir, 'trips.json') };
 }
 
@@ -674,21 +678,7 @@ describe('Auth-enabled API', () => {
   let authServer;
   let authBaseUrl;
   let cleanupAuthServer;
-
-  async function authReq(method, reqPath, body, headers = {}) {
-    const url = new URL(authBaseUrl + reqPath);
-    const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
-    const fetchFn = fetch || globalThis.fetch;
-    const res = await fetchFn(url.toString(), {
-      method,
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
-    let json;
-    try { json = JSON.parse(text); } catch { json = text; }
-    return { status: res.status, body: json, headers: res.headers };
-  }
+  const authReq = (method, reqPath, body, headers = {}) => doReq(authBaseUrl, method, reqPath, body, headers);
 
   before(() => {
     const { app: authApp, cleanup } = loadFreshServer({
