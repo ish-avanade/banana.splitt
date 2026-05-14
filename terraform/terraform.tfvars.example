@@ -1,0 +1,46 @@
+# Rename this file to terraform.tfvars and fill in the values
+
+# Resource naming
+resource_group_name = "rg-banana-splitt"
+location            = "West Europe"
+environment         = "dev"
+app_name            = "banana-splitt-app"
+
+# App Service
+app_service_sku = "B1"  # B1 for dev/test, S1 for production
+
+# SQL Server and Database
+sql_server_name   = "banana-splitt-sql-prod"  # Must be globally unique
+sql_database_name = "banana_splitt_db"
+sql_database_sku  = "Basic"  # Basic for dev, Standard/Premium for prod
+sql_admin_username = "sqladmin"
+
+# Key Vault
+key_vault_name = "iaj-banana-kv-prod"  # Must be globally unique and 3-24 chars
+
+# Storage Account (optional)
+create_storage_account = false
+storage_account_name   = "bananasplittstorage"  # Must be globally unique and lowercase
+
+# OAuth Configuration (from GitHub OAuth App)
+github_client_id     = "Ov23liTQK12tUQMlE6IJ"
+github_client_secret = "b7d6de8c1557dc1097830c525af45818ab2ba36d"
+
+# AI provider (optional) — set EITHER the direct OpenAI block OR the Azure OpenAI block.
+# Leave blank to disable the AI chat bar.
+
+# Direct OpenAI
+openai_api_key = ""
+openai_model   = ""  # e.g. "gpt-4o-mini"
+
+# Azure OpenAI
+azure_openai_api_key     = ""
+azure_openai_endpoint    = ""  # e.g. "https://my-resource.openai.azure.com"
+azure_openai_deployment  = ""  # e.g. "gpt-4.1-deployment"
+azure_openai_api_version = ""  # e.g. "2024-08-01-preview"
+
+# Optional: Your IP for SQL firewall access during development
+dev_ip = ""  # e.g., "203.0.113.42"
+
+# Custom domain (optional)
+custom_domain = ""  # e.g., "splitt.example.com"

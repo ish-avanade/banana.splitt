@@ -134,6 +134,52 @@ OPENAI_API_KEY=<your-key>
 
 Copy `.env.example` to `.env` and fill in the variables you need. At minimum you need either the Azure OpenAI set or the direct OpenAI set for AI features to be available.
 
+## Deploying to Azure
+
+Infrastructure is described with Terraform under [terraform/](terraform/) and the app is deployed as a zip to Azure App Service. The wrapper script [setup.sh](setup.sh) at the repo root handles both layers.
+
+### Prerequisites
+
+- [Terraform](https://www.terraform.io/downloads.html) ≥ 1.5
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) — run `az login` first
+- A GitHub OAuth App ([create one](https://github.com/settings/applications/new)) with the callback URL set to `https://<app-name>.azurewebsites.net/auth/github/callback`
+- `terraform/terraform.tfvars` — copy from `terraform.tfvars.example` and fill in `sql_server_name`, `key_vault_name`, `github_client_id`, `github_client_secret`
+
+### One-shot deploy (infrastructure + app)
+
+```bash
+./setup.sh deploy --auto-approve
+```
+
+This runs `terraform apply`, then zips the app and deploys it to App Service (Oryx runs `npm install` server-side).
+
+### Deploy infrastructure only
+
+```bash
+./setup.sh deploy --infra-only --auto-approve
+```
+
+### Deploy app code only
+
+Use this for fast code-only redeploys after the first `terraform apply`:
+
+```bash
+./setup.sh deploy --app-only
+```
+
+The script reads `app_service_name` and `resource_group_name` from `terraform output`. Override with `--rg <name> --app <name>` if needed.
+
+### Other commands
+
+```bash
+./setup.sh plan                                 # terraform plan only
+./setup.sh deploy --tfvars terraform.prod.tfvars
+./setup.sh output                               # show terraform outputs
+./setup.sh destroy --auto-approve               # tear down infra
+```
+
+See [terraform/README.md](terraform/README.md) for full details on the resources created and remote state setup.
+
 ## Copilot Agents & Prompts
 
 This project includes custom VS Code Copilot agents and prompts for an AI-assisted development workflow.
