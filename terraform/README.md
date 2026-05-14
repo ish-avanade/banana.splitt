@@ -54,7 +54,7 @@ nano terraform.tfvars
 For team collaboration and production use:
 
 ```bash
-./terraform/remote_state_setup.md  # Follow these instructions
+cat remote_state_setup.md  # Read and follow these instructions
 ```
 
 For now, local state is fine for development.
