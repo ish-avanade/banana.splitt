@@ -835,7 +835,7 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       const newParticipant = { id: uuidv4(), name: trimmed };
       const participant = await db.addParticipant(req.params.id, newParticipant);
       if (!participant) {
-        console.error('Failed to persist parsed participant:', trimmed);
+        console.error(`Failed to persist parsed participant "${trimmed}" for trip ${req.params.id}`);
         return null;
       }
       trip.participants.push(participant);
