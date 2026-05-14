@@ -733,7 +733,7 @@ describe('Auth-enabled API', () => {
     }, jwtSecret, { expiresIn: '1h' });
 
     const { status, body } = await authReq('GET', '/api/trips', undefined, {
-      Cookie: `${authCookieName}=${token}`,
+      Cookie: `${authCookieName}=${encodeURIComponent(token)}`,
     });
 
     assert.equal(status, 200);
@@ -745,7 +745,7 @@ describe('Auth-enabled API', () => {
       Cookie: `${authCookieName}=%E0%A4%A`,
     });
     assert.equal(status, 401);
-    assert.equal(body.error, 'Invalid or expired token');
+    assert.equal(body.error, 'Not authenticated');
   });
 
   it('POST /auth/logout clears the auth cookie', async () => {
@@ -863,7 +863,7 @@ describe('SQL query safety', () => {
       const result = await db.removeParticipant('trip-1', 'participant-1');
       assert.equal(result, true);
       assert.match(queries[1].sql, /SELECT COUNT\(\*\) AS cnt FROM expenses/);
-      assert.match(queries[1].sql, /UNION ALL\s+SELECT COUNT\(\*\) AS cnt FROM expense_splits/s);
+      assert.match(queries[1].sql, /UNION ALL\s+SELECT COUNT\(\*\) AS cnt FROM expense_splits/);
     } finally {
       await cleanup();
     }

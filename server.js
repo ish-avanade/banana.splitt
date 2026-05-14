@@ -293,7 +293,7 @@ function parseCookies(req) {
     try {
       cookies[k.trim()] = decodeURIComponent(value);
     } catch {
-      cookies[k.trim()] = value;
+      // Ignore malformed cookie values so they can't break auth parsing.
     }
   });
   return cookies;
