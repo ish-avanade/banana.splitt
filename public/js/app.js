@@ -26,6 +26,61 @@ const put  = (path, body)  => api('PUT',    path, body);
 const del  = (path)        => api('DELETE', path);
 
 // ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+let authState = null;
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/auth/me');
+    authState = await res.json();
+  } catch {
+    authState = { authenticated: false, authEnabled: false };
+  }
+  renderAuthUI();
+  return authState;
+}
+
+function renderAuthUI() {
+  const userEl = document.getElementById('header-user');
+  if (!authState || !authState.authEnabled) {
+    userEl.innerHTML = '';
+    return;
+  }
+  if (authState.authenticated && authState.user) {
+    const u = authState.user;
+    const name = escHtml(u.name || u.login);
+    const avatar = u.avatar ? `<img src="${escAttr(u.avatar)}" alt="" class="user-avatar" width="28" height="28">` : '';
+    userEl.innerHTML = `${avatar}<span class="user-name">${name}</span><button class="btn btn-small btn-logout" id="btn-logout">Logout</button>`;
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      location.reload();
+    });
+  } else {
+    const ghUrl = '/auth/github';
+    userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small">Sign in with GitHub</a>`;
+  }
+}
+
+function showLoginPage() {
+  const main = document.getElementById('main-content');
+  const ghUrl = '/auth/github';
+  main.innerHTML = `
+    <section class="page login-page">
+      <div class="login-box">
+        <div class="login-logo">🍌</div>
+        <h1>banana/splitt</h1>
+        <p>Sign in to manage your trip expenses</p>
+        <a href="${ghUrl}" class="btn btn-primary btn-github">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Sign in with GitHub
+        </a>
+      </div>
+    </section>`;
+}
+
+// ---------------------------------------------------------------------------
 // Toast notifications
 // ---------------------------------------------------------------------------
 
@@ -73,9 +128,16 @@ function navigate(hash) {
 }
 
 window.addEventListener('hashchange', render);
-window.addEventListener('load', render);
+window.addEventListener('load', async () => {
+  await checkAuth();
+  render();
+});
 
 function render() {
+  if (authState && authState.authEnabled && !authState.authenticated) {
+    showLoginPage();
+    return;
+  }
   const hash = location.hash.replace('#', '');
   if (hash.startsWith('trip/')) {
     const id = hash.replace('trip/', '');
@@ -1818,26 +1880,87 @@ async function confirmDeleteExpense(trip, expense, onSuccess) {
 
 function showAddMemberModal(trip, onSuccess) {
   openModal(`
-    <h2 class="modal-title">Add Member</h2>
+    <h2 class="modal-title">Add Members</h2>
     <form id="add-member-form">
       <div class="form-group">
-        <label for="member-name">Name *</label>
-        <input id="member-name" type="text" placeholder="e.g. Alice" required maxlength="60" />
+        <label>Names *</label>
+        <div id="member-rows"></div>
+        <button type="button" class="btn btn-link" id="add-another-row" style="align-self:flex-start;padding:0;margin-top:.25rem;font-size:.85rem">+ Add another</button>
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
-        <button type="submit" class="btn btn-primary">Add Member</button>
+        <button type="submit" class="btn btn-primary">Add Members</button>
       </div>
     </form>
   `);
+
+  const rowsContainer = document.getElementById('member-rows');
+
+  function addRow(value = '') {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:.35rem;align-items:center;margin-bottom:.35rem';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'e.g. Alice';
+    input.maxLength = 60;
+    input.value = value;
+    input.style.flex = '1';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addRow(); }
+    });
+    row.appendChild(input);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.style.cssText = 'background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted);padding:0 .25rem';
+    removeBtn.addEventListener('click', () => {
+      if (rowsContainer.children.length > 1) row.remove();
+    });
+    row.appendChild(removeBtn);
+    rowsContainer.appendChild(row);
+    input.focus();
+  }
+
+  addRow();
+  document.getElementById('add-another-row').addEventListener('click', () => addRow());
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
   document.getElementById('add-member-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = document.getElementById('member-name').value.trim();
+    const inputs = rowsContainer.querySelectorAll('input');
+    const names = [...inputs].map(i => i.value.trim()).filter(Boolean);
+    // Deduplicate within batch (case-insensitive, keep first occurrence)
+    const seen = new Set();
+    const unique = [];
+    for (const n of names) {
+      const key = n.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); unique.push(n); }
+    }
+    // Filter out existing participants
+    const existing = new Set(trip.participants.map(p => p.name.toLowerCase()));
+    const dupes = unique.filter(n => existing.has(n.toLowerCase()));
+    const toAdd = unique.filter(n => !existing.has(n.toLowerCase()));
+
+    if (toAdd.length === 0 && dupes.length === 0) {
+      toast('Enter at least one name', 'error');
+      return;
+    }
+    if (dupes.length > 0) {
+      toast(`Skipped duplicate${dupes.length > 1 ? 's' : ''}: ${dupes.join(', ')}`, 'warning');
+    }
+    if (toAdd.length === 0) return;
+
     try {
-      await post(`/trips/${trip.id}/participants`, { name });
+      for (const name of toAdd) {
+        await post(`/trips/${trip.id}/participants`, { name });
+      }
       closeModal();
-      toast(`${name} added 👋`, 'success');
+      if (toAdd.length === 1) {
+        toast(`${toAdd[0]} added 👋`, 'success');
+      } else {
+        toast(`${toAdd.length} members added 👋`, 'success');
+      }
       onSuccess();
     } catch (err) {
       toast(err.message, 'error');

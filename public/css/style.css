@@ -834,3 +834,67 @@ main#main-content {
   .ai-chat-form { flex-direction: column; }
   .ai-chat-send { width: 100%; justify-content: center; }
 }
+
+/* ---- Auth / Login ----------------------------------------- */
+.header-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.user-avatar {
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.user-name {
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.btn-small {
+  padding: .35rem .75rem;
+  font-size: .8rem;
+}
+.btn-logout {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.btn-logout:hover {
+  background: var(--red-light);
+  color: var(--red);
+  border-color: var(--red);
+}
+.login-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+.login-box {
+  text-align: center;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 3rem 2.5rem;
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+  width: 100%;
+}
+.login-logo {
+  font-size: 4rem;
+  margin-bottom: .5rem;
+}
+.login-box h1 {
+  margin-bottom: .5rem;
+}
+.login-box p {
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+}
+.btn-github {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem 1.5rem;
+  font-size: 1rem;
+}

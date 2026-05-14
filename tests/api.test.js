@@ -6,6 +6,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const jwt = require('jsonwebtoken');
 
 // Use a temp data file so tests don't touch real data
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-'));
@@ -41,23 +42,65 @@ after(() => {
   });
 });
 
-async function req(method, path, body) {
-  const url = new URL(baseUrl + path);
+async function doReq(base, method, path, body, headers = {}, options = {}) {
+  const url = new URL(base + path);
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   };
+  // Prefers node-fetch when available, but falls back to the built-in fetch on Node 18+.
   const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
-  // Fall back to native fetch (Node 18+)
   const fetchFn = fetch || globalThis.fetch;
   const res = await fetchFn(url.toString(), {
     ...opts,
+    ...options,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = text; }
-  return { status: res.status, body: json };
+  return { status: res.status, body: json, headers: res.headers };
+}
+
+async function req(method, path, body, headers = {}, options = {}) {
+  return doReq(baseUrl, method, path, body, headers, options);
+}
+
+function makeTempDataFile() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-splitt-test-'));
+  return { dir, file: path.join(dir, 'trips.json') };
+}
+
+function loadFreshServer(envOverrides = {}) {
+  const serverEnvKeys = ['DATA_FILE_OVERRIDE', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
+  const authEnvKeys = serverEnvKeys.filter((key) => key !== 'DATA_FILE_OVERRIDE');
+  const previousEnv = Object.fromEntries(serverEnvKeys.map((key) => [key, process.env[key]]));
+  const tempData = makeTempDataFile();
+
+  process.env.DATA_FILE_OVERRIDE = tempData.file;
+  for (const key of authEnvKeys) {
+    if (Object.hasOwn(envOverrides, key)) {
+      process.env[key] = envOverrides[key];
+    } else {
+      delete process.env[key];
+    }
+  }
+
+  const serverPath = require.resolve('../server.js');
+  delete require.cache[serverPath];
+  const loaded = require('../server.js');
+
+  return {
+    ...loaded,
+    cleanup() {
+      delete require.cache[serverPath];
+      for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      try { fs.rmSync(tempData.dir, { recursive: true }); } catch { /* ignore: temp dir may already be removed */ }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +605,11 @@ describe('AI parse-expense', () => {
 
       // Verify the new participant persists in the trip
       const { body: trip } = await req('GET', `/api/trips/${tripId}`);
-      assert.ok(trip.participants.some((p) => p.name === 'Ish'), 'Ish should be persisted as a participant');
+      assert.equal(
+        trip.participants.filter((p) => p.name === 'Ish').length,
+        1,
+        'Ish should be persisted exactly once as a participant'
+      );
     } finally {
       delete process.env.MOCK_AI_RESPONSE;
       // Remove the auto-created participant to keep state clean for other tests
@@ -627,6 +674,233 @@ describe('AI parse-expense', () => {
       assert.equal(body.expenses[0].currency, 'EUR');
     } finally {
       delete process.env.MOCK_AI_RESPONSE;
+    }
+  });
+});
+
+describe('Auth-enabled API', () => {
+  const authCookieName = 'bs_token';
+  const authStateCookieName = 'bs_auth_state';
+  const jwtSecret = 'test-jwt-secret';
+  let authServer;
+  let authBaseUrl;
+  let cleanupAuthServer;
+  const authReq = (method, path, body, headers = {}, options = {}) => doReq(authBaseUrl, method, path, body, headers, options);
+
+  before(() => {
+    const { app: authApp, cleanup } = loadFreshServer({
+      GITHUB_CLIENT_ID: 'test-client-id',
+      GITHUB_CLIENT_SECRET: 'test-client-secret',
+      JWT_SECRET: jwtSecret,
+    });
+    cleanupAuthServer = cleanup;
+
+    return new Promise((resolve) => {
+      authServer = http.createServer(authApp);
+      authServer.listen(0, '127.0.0.1', () => {
+        const { port } = authServer.address();
+        authBaseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+  });
+
+  after(() => {
+    return new Promise((resolve) => {
+      authServer.close(() => {
+        cleanupAuthServer();
+        resolve();
+      });
+    });
+  });
+
+  it('GET /auth/me reports auth enabled and unauthenticated without a cookie', async () => {
+    const { status, body } = await authReq('GET', '/auth/me');
+    assert.equal(status, 200);
+    assert.equal(body.authEnabled, true);
+    assert.equal(body.authenticated, false);
+    assert.equal(body.clientId, 'test-client-id');
+  });
+
+  it('GET /api/trips returns 401 without an auth cookie when auth is enabled', async () => {
+    const { status, body } = await authReq('GET', '/api/trips');
+    assert.equal(status, 401);
+    assert.equal(body.error, 'Not authenticated');
+  });
+
+  it('GET /api/trips returns 200 with a valid JWT auth cookie when auth is enabled', async () => {
+    const token = jwt.sign({
+      id: 'user-1',
+      login: 'octocat',
+      name: 'Octo Cat',
+      avatar: 'https://example.com/avatar.png',
+    }, jwtSecret, { expiresIn: '1h' });
+
+    const { status, body } = await authReq('GET', '/api/trips', undefined, {
+      Cookie: `${authCookieName}=${encodeURIComponent(token)}`,
+    });
+
+    assert.equal(status, 200);
+    assert.deepEqual(body, []);
+  });
+
+  it('GET /api/trips handles malformed auth cookies without crashing', async () => {
+    const { status, body } = await authReq('GET', '/api/trips', undefined, {
+      Cookie: `${authCookieName}=%E0%A4%A`,
+    });
+    assert.equal(status, 401);
+    assert.equal(body.error, 'Not authenticated');
+  });
+
+  it('POST /auth/logout clears the auth cookie', async () => {
+    const { status, body, headers } = await authReq('POST', '/auth/logout');
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true });
+    const setCookie = headers.get('set-cookie');
+    assert.ok(setCookie);
+    assert.match(setCookie, /bs_token=;/);
+  });
+
+  it('GET /auth/github sets an auth state cookie and redirects to GitHub', async () => {
+    const { status, headers } = await authReq('GET', '/auth/github', undefined, {}, { redirect: 'manual' });
+    assert.equal(status, 302);
+    const location = headers.get('location');
+    assert.ok(location);
+    assert.match(location, /^https:\/\/github\.com\/login\/oauth\/authorize\?/);
+    assert.match(location, /client_id=test-client-id/);
+    assert.match(location, /scope=read%3Auser|scope=read:user/);
+    assert.match(location, /state=/);
+    const setCookie = headers.get('set-cookie');
+    assert.ok(setCookie);
+    assert.match(setCookie, /bs_auth_state=/);
+  });
+
+  it('GET /auth/github/callback rejects requests with an invalid auth state', async () => {
+    const { status, body } = await authReq('GET', '/auth/github/callback?code=test-code&state=wrong-state', undefined, {
+      Cookie: `${authStateCookieName}=expected-state`,
+    });
+    assert.equal(status, 400);
+    assert.equal(body, 'Invalid auth state');
+  });
+
+  it('GET /auth/github/callback returns 400 when code is missing', async () => {
+    const { status, body } = await authReq('GET', '/auth/github/callback');
+    assert.equal(status, 400);
+    assert.equal(body, 'Missing code parameter');
+  });
+});
+
+describe('SQL query safety', () => {
+  function loadDbWithMock(responses) {
+    const queries = [];
+    const fakeSql = {
+      NVarChar: 'NVarChar',
+      Float: 'Float',
+    };
+
+    function makeRequest() {
+      const inputs = {};
+      return {
+        input(name, _type, value) {
+          inputs[name] = value;
+          return this;
+        },
+        async query(sqlText) {
+          queries.push({ sql: sqlText, inputs: { ...inputs } });
+          return responses.shift() || { recordset: [], rowsAffected: [0] };
+        },
+      };
+    }
+
+    const fakePool = {
+      request: makeRequest,
+      transaction() {
+        return {
+          async begin() {},
+          async commit() {},
+          async rollback() {},
+          request: makeRequest,
+        };
+      },
+      async close() {},
+    };
+
+    fakeSql.connect = async () => fakePool;
+
+    const dbModulePath = require.resolve('../db');
+    const mssqlModulePath = require.resolve('mssql');
+    const previousMssql = require.cache[mssqlModulePath];
+
+    delete require.cache[dbModulePath];
+    require.cache[mssqlModulePath] = {
+      id: mssqlModulePath,
+      filename: mssqlModulePath,
+      loaded: true,
+      exports: fakeSql,
+    };
+
+    process.env.SQL_CONNECTION_STRING = 'Server=fake;Database=fake;';
+    const db = require('../db');
+
+    return {
+      db,
+      queries,
+      async cleanup() {
+        await db.close();
+        delete require.cache[dbModulePath];
+        if (previousMssql) require.cache[mssqlModulePath] = previousMssql;
+        else delete require.cache[mssqlModulePath];
+        delete process.env.SQL_CONNECTION_STRING;
+      },
+    };
+  }
+
+  it('removeParticipant aliases both expense count queries consistently', async () => {
+    const { db, queries, cleanup } = loadDbWithMock([
+      { recordset: [], rowsAffected: [0] },
+      { recordset: [{ cnt: 0 }, { cnt: 0 }], rowsAffected: [0] },
+      { recordset: [], rowsAffected: [1] },
+    ]);
+
+    try {
+      await db.init();
+      const result = await db.removeParticipant('trip-1', 'participant-1');
+      assert.equal(result, true);
+      assert.match(queries[1].sql, /SELECT COUNT\(\*\) AS cnt FROM expenses/);
+      assert.match(queries[1].sql, /UNION ALL\s+SELECT COUNT\(\*\) AS cnt FROM expense_splits/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('updateExpense constrains the update query by tripId', async () => {
+    const { db, queries, cleanup } = loadDbWithMock([
+      { recordset: [], rowsAffected: [0] },
+      {
+        recordset: [{
+          id: 'expense-1',
+          description: 'Dinner',
+          amount: 25,
+          paidBy: 'participant-1',
+          date: '2024-05-01',
+          category: 'Food',
+          originalCurrency: null,
+          originalAmount: null,
+          convertedAmount: null,
+        }],
+        rowsAffected: [1],
+      },
+      { recordset: [], rowsAffected: [1] },
+      { recordset: [], rowsAffected: [0] },
+    ]);
+
+    try {
+      await db.init();
+      await db.updateExpense('trip-1', 'expense-1', { amount: 30 });
+      assert.equal(queries[2].inputs.tripId, 'trip-1');
+      assert.match(queries[2].sql, /WHERE id=@id AND tripId=@tripId/);
+    } finally {
+      await cleanup();
     }
   });
 });

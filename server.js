@@ -5,34 +5,151 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = process.env.DATA_FILE_OVERRIDE || path.join(__dirname, 'data', 'trips.json');
-
-// Ensure data directory exists
-if (!fs.existsSync(path.dirname(DATA_FILE))) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-}
 
 // ---------------------------------------------------------------------------
-// Persistence helpers
+// Persistence mode — SQL when SQL_CONNECTION_STRING is set, JSON otherwise
 // ---------------------------------------------------------------------------
+const useSQL = !!process.env.SQL_CONNECTION_STRING;
+let db;
 
-function loadData() {
-  if (!fs.existsSync(DATA_FILE)) {
-    return { trips: [] };
+if (useSQL) {
+  db = require('./db');
+} else {
+  // JSON file persistence (local dev)
+  const DATA_FILE = process.env.DATA_FILE_OVERRIDE || path.join(__dirname, 'data', 'trips.json');
+  if (!fs.existsSync(path.dirname(DATA_FILE))) {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   }
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch {
-    return { trips: [] };
-  }
-}
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  function loadData() {
+    if (!fs.existsSync(DATA_FILE)) return { trips: [] };
+    try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
+    catch { return { trips: [] }; }
+  }
+  function saveData(data) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  }
+
+  // Wrap JSON persistence in the same async interface as db module
+  db = {
+    init: async () => {},
+    close: async () => {},
+    listTrips: async () => {
+      const data = loadData();
+      return data.trips.map((t) => ({
+        id: t.id, name: t.name, description: t.description, currency: t.currency,
+        startDate: t.startDate ?? null, endDate: t.endDate ?? null, budget: t.budget ?? null,
+        participantCount: t.participants.length, expenseCount: t.expenses.length,
+        totalAmount: t.expenses.reduce((sum, e) => sum + e.amount, 0), createdAt: t.createdAt,
+      }));
+    },
+    getTrip: async (id) => {
+      const data = loadData();
+      return data.trips.find((t) => t.id === id) || null;
+    },
+    createTrip: async (trip) => {
+      const data = loadData();
+      trip.participants = []; trip.expenses = [];
+      data.trips.push(trip);
+      saveData(data);
+      return trip;
+    },
+    updateTrip: async (id, fields) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === id);
+      if (!trip) return null;
+      Object.assign(trip, fields);
+      saveData(data);
+      return trip;
+    },
+    deleteTrip: async (id) => {
+      const data = loadData();
+      const idx = data.trips.findIndex((t) => t.id === id);
+      if (idx === -1) return false;
+      data.trips.splice(idx, 1);
+      saveData(data);
+      return true;
+    },
+    addParticipant: async (tripId, participant) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === tripId);
+      if (!trip) return null;
+      trip.participants.push(participant);
+      saveData(data);
+      return participant;
+    },
+    removeParticipant: async (tripId, pid) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === tripId);
+      if (!trip) return { error: 'Trip not found' };
+      const pidx = trip.participants.findIndex((p) => p.id === pid);
+      if (pidx === -1) return { error: 'Participant not found' };
+      const hasExpenses = trip.expenses.some(
+        (e) => e.paidBy === pid || e.splitBetween.includes(pid)
+      );
+      if (hasExpenses) return { error: 'Cannot remove a participant who is part of one or more expenses. Delete those expenses first.' };
+      trip.participants.splice(pidx, 1);
+      saveData(data);
+      return true;
+    },
+    addExpense: async (tripId, expense) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === tripId);
+      if (!trip) return null;
+      trip.expenses.push(expense);
+      saveData(data);
+      return expense;
+    },
+    updateExpense: async (tripId, expenseId, fields) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === tripId);
+      if (!trip) return null;
+      const expense = trip.expenses.find((e) => e.id === expenseId);
+      if (!expense) return null;
+      if (fields.description !== undefined) expense.description = fields.description;
+      if (fields.amount !== undefined) expense.amount = fields.amount;
+      if (fields.paidBy !== undefined) expense.paidBy = fields.paidBy;
+      if (fields.splitBetween !== undefined) expense.splitBetween = fields.splitBetween;
+      if (fields.date !== undefined) expense.date = fields.date;
+      if (fields.category !== undefined) expense.category = String(fields.category).trim();
+      if (fields.originalCurrency !== undefined) {
+        if (fields.originalCurrency && fields.originalCurrency !== trip.currency) {
+          expense.originalCurrency = fields.originalCurrency;
+          if (typeof fields.originalAmount === 'number') expense.originalAmount = fields.originalAmount;
+          if (typeof fields.convertedAmount === 'number') expense.convertedAmount = fields.convertedAmount;
+        } else {
+          delete expense.originalCurrency;
+          delete expense.originalAmount;
+          delete expense.convertedAmount;
+        }
+      }
+      saveData(data);
+      return expense;
+    },
+    deleteExpense: async (tripId, expenseId) => {
+      const data = loadData();
+      const trip = data.trips.find((t) => t.id === tripId);
+      if (!trip) return false;
+      const eidx = trip.expenses.findIndex((e) => e.id === expenseId);
+      if (eidx === -1) return false;
+      trip.expenses.splice(eidx, 1);
+      saveData(data);
+      return true;
+    },
+    // For AI parse-expense: save full data object after modifying trip in-place
+    _saveTrip: async (tripId) => {
+      // no-op; JSON db.addParticipant already saves.
+    },
+    _getLoadSave: () => {
+      return { loadData, saveData };
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +232,171 @@ function calculateBalances(trip) {
 // Middleware
 // ---------------------------------------------------------------------------
 
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
+
+// Security headers — must be before express.static so headers are sent on all responses
+app.use((_req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('X-XSS-Protection', '0');
+  if (process.env.NODE_ENV === 'production' || process.env.WEBSITE_SITE_NAME) {
+    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------------------------------------------------------------------------
+// GitHub OAuth + JWT auth
+// ---------------------------------------------------------------------------
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const AUTH_ENABLED = !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET);
+
+if (AUTH_ENABLED && JWT_SECRET === 'dev-secret-change-me') {
+  console.error('FATAL: JWT_SECRET must be explicitly set when auth is enabled. Refusing to start.');
+  process.exit(1);
+}
+const COOKIE_NAME = 'bs_token';
+const AUTH_STATE_COOKIE = 'bs_auth_state';
+const isSecureCookie = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod' || !!process.env.WEBSITE_SITE_NAME;
+
+function setAuthCookie(res, token) {
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: isSecureCookie,
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
+  });
+}
+
+function setAuthStateCookie(res, state) {
+  res.cookie(AUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: isSecureCookie,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000, // 10 minutes
+    path: '/',
+  });
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  const cookies = {};
+  header.split(';').forEach((c) => {
+    const [k, ...v] = c.split('=');
+    if (!k) return;
+    const value = v.join('=').trim();
+    try {
+      cookies[k.trim()] = decodeURIComponent(value);
+    } catch {
+      // Ignore malformed cookie values so they can't break auth parsing.
+    }
+  });
+  return cookies;
+}
+
+function requireAuth(req, res, next) {
+  if (!AUTH_ENABLED) return next(); // no OAuth configured — open access
+  const cookies = parseCookies(req);
+  const token = cookies[COOKIE_NAME];
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Auth status endpoint (always public)
+app.get('/auth/me', (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ authenticated: true, authEnabled: false });
+  const cookies = parseCookies(req);
+  const token = cookies[COOKIE_NAME];
+  if (!token) return res.json({ authenticated: false, authEnabled: true, clientId: GITHUB_CLIENT_ID });
+  try {
+    const user = jwt.verify(token, JWT_SECRET);
+    return res.json({ authenticated: true, authEnabled: true, user });
+  } catch {
+    return res.json({ authenticated: false, authEnabled: true, clientId: GITHUB_CLIENT_ID });
+  }
+});
+
+app.get('/auth/github', (req, res) => {
+  if (!AUTH_ENABLED) return res.redirect('/');
+  const state = crypto.randomBytes(32).toString('hex');
+  setAuthStateCookie(res, state);
+  const redirectUri = `${req.protocol}://${req.get('host')}/auth/github/callback`;
+  const ghUrl = `https://github.com/login/oauth/authorize?${new URLSearchParams({
+    client_id: GITHUB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: 'read:user',
+    state,
+  }).toString()}`;
+  return res.redirect(ghUrl);
+});
+
+// GitHub OAuth callback
+app.get('/auth/github/callback', async (req, res) => {
+  const { code, state } = req.query;
+  if (!code) return res.status(400).send('Missing code parameter');
+  const cookies = parseCookies(req);
+  const expectedState = cookies[AUTH_STATE_COOKIE];
+  res.clearCookie(AUTH_STATE_COOKIE, { path: '/' });
+  if (!state || !expectedState || state !== expectedState) {
+    return res.status(400).send('Invalid auth state');
+  }
+
+  try {
+    // Exchange code for access token
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) {
+      console.error('GitHub OAuth token error:', tokenData);
+      return res.status(401).send('GitHub authentication failed');
+    }
+
+    // Get user info
+    const userRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'banana-splitt' },
+    });
+    const ghUser = await userRes.json();
+
+    const jwtPayload = {
+      id: String(ghUser.id),
+      login: ghUser.login,
+      name: ghUser.name || ghUser.login,
+      avatar: ghUser.avatar_url,
+    };
+    const token = jwt.sign(jwtPayload, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, token);
+    res.redirect('/');
+  } catch (err) {
+    console.error('GitHub OAuth error:', err);
+    res.status(500).send('Authentication failed');
+  }
+});
+
+// Logout
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie(COOKIE_NAME, { path: '/' });
+  res.json({ ok: true });
+});
+
+// Protect all API routes
+app.use('/api', requireAuth);
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -150,86 +430,91 @@ function validateDates(startDate, endDate) {
 // ---------------------------------------------------------------------------
 
 // List all trips
-app.get('/api/trips', (req, res) => {
-  const data = loadData();
-  const summary = data.trips.map((t) => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-    currency: t.currency,
-    startDate: t.startDate ?? null,
-    endDate: t.endDate ?? null,
-    budget: t.budget ?? null,
-    participantCount: t.participants.length,
-    expenseCount: t.expenses.length,
-    totalAmount: t.expenses.reduce((sum, e) => sum + e.amount, 0),
-    createdAt: t.createdAt,
-  }));
-  res.json(summary);
+app.get('/api/trips', async (req, res) => {
+  try {
+    const summary = await db.listTrips();
+    res.json(summary);
+  } catch (err) {
+    console.error('GET /api/trips error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Create a trip
-app.post('/api/trips', (req, res) => {
+app.post('/api/trips', async (req, res) => {
   const { name, description, currency, startDate, endDate, budget } = req.body;
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Trip name is required' });
   }
   const dateError = validateDates(startDate ?? null, endDate ?? null);
   if (dateError) return res.status(400).json({ error: dateError });
-  const data = loadData();
-  const trip = {
-    id: uuidv4(),
-    name: name.trim(),
-    description: (description || '').trim(),
-    currency: (currency || 'USD').trim(),
-    startDate: startDate || null,
-    endDate: endDate || null,
-    budget: typeof budget === 'number' && budget > 0 ? budget : null,
-    participants: [],
-    expenses: [],
-    createdAt: new Date().toISOString(),
-  };
-  data.trips.push(trip);
-  saveData(data);
-  res.status(201).json(trip);
+  try {
+    const trip = await db.createTrip({
+      id: uuidv4(),
+      name: name.trim(),
+      description: (description || '').trim(),
+      currency: (currency || 'USD').trim(),
+      startDate: startDate || null,
+      endDate: endDate || null,
+      budget: typeof budget === 'number' && budget > 0 ? budget : null,
+      participants: [],
+      expenses: [],
+      createdAt: new Date().toISOString(),
+    });
+    res.status(201).json(trip);
+  } catch (err) {
+    console.error('POST /api/trips error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Get a single trip
-app.get('/api/trips/:id', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  res.json(trip);
+app.get('/api/trips/:id', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    res.json(trip);
+  } catch (err) {
+    console.error('GET /api/trips/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Update a trip's name / description / currency / dates / budget
-app.put('/api/trips/:id', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const { name, description, currency, startDate, endDate, budget } = req.body;
-  const newStart = startDate !== undefined ? (startDate || null) : trip.startDate;
-  const newEnd   = endDate   !== undefined ? (endDate   || null) : trip.endDate;
-  const dateError = validateDates(newStart, newEnd);
-  if (dateError) return res.status(400).json({ error: dateError });
-  if (name !== undefined) trip.name = name.trim();
-  if (description !== undefined) trip.description = description.trim();
-  if (currency !== undefined) trip.currency = currency.trim();
-  if (startDate !== undefined) trip.startDate = startDate || null;
-  if (endDate !== undefined) trip.endDate = endDate || null;
-  if (budget !== undefined) trip.budget = typeof budget === 'number' && budget > 0 ? budget : null;
-  saveData(data);
-  res.json(trip);
+app.put('/api/trips/:id', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    const { name, description, currency, startDate, endDate, budget } = req.body;
+    const newStart = startDate !== undefined ? (startDate || null) : trip.startDate;
+    const newEnd   = endDate   !== undefined ? (endDate   || null) : trip.endDate;
+    const dateError = validateDates(newStart, newEnd);
+    if (dateError) return res.status(400).json({ error: dateError });
+    const fields = {};
+    if (name !== undefined) fields.name = name.trim();
+    if (description !== undefined) fields.description = description.trim();
+    if (currency !== undefined) fields.currency = currency.trim();
+    if (startDate !== undefined) fields.startDate = startDate || null;
+    if (endDate !== undefined) fields.endDate = endDate || null;
+    if (budget !== undefined) fields.budget = typeof budget === 'number' && budget > 0 ? budget : null;
+    const updated = await db.updateTrip(req.params.id, fields);
+    res.json(updated);
+  } catch (err) {
+    console.error('PUT /api/trips/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Delete a trip
-app.delete('/api/trips/:id', (req, res) => {
-  const data = loadData();
-  const idx = data.trips.findIndex((t) => t.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Trip not found' });
-  data.trips.splice(idx, 1);
-  saveData(data);
-  res.status(204).end();
+app.delete('/api/trips/:id', async (req, res) => {
+  try {
+    const deleted = await db.deleteTrip(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Trip not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('DELETE /api/trips/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -237,42 +522,38 @@ app.delete('/api/trips/:id', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // Add a participant
-app.post('/api/trips/:id/participants', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const { name } = req.body;
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'Participant name is required' });
+app.post('/api/trips/:id/participants', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Participant name is required' });
+    }
+    const participant = await db.addParticipant(req.params.id, { id: uuidv4(), name: name.trim() });
+    res.status(201).json(participant);
+  } catch (err) {
+    console.error('POST /api/trips/:id/participants error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  const participant = { id: uuidv4(), name: name.trim() };
-  trip.participants.push(participant);
-  saveData(data);
-  res.status(201).json(participant);
 });
 
 // Remove a participant (only if they have no expenses)
-app.delete('/api/trips/:id/participants/:pid', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const pidx = trip.participants.findIndex((p) => p.id === req.params.pid);
-  if (pidx === -1) return res.status(404).json({ error: 'Participant not found' });
-
-  const hasExpenses = trip.expenses.some(
-    (e) =>
-      e.paidBy === req.params.pid || e.splitBetween.includes(req.params.pid)
-  );
-  if (hasExpenses) {
-    return res.status(400).json({
-      error:
-        'Cannot remove a participant who is part of one or more expenses. Delete those expenses first.',
-    });
+app.delete('/api/trips/:id/participants/:pid', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    const result = await db.removeParticipant(req.params.id, req.params.pid);
+    if (result === true) return res.status(204).end();
+    if (result && result.error) {
+      const status = result.error.includes('Cannot remove') ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.status(404).json({ error: 'Participant not found' });
+  } catch (err) {
+    console.error('DELETE /api/trips/:id/participants/:pid error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  trip.participants.splice(pidx, 1);
-  saveData(data);
-  res.status(204).end();
 });
 
 // ---------------------------------------------------------------------------
@@ -280,74 +561,22 @@ app.delete('/api/trips/:id/participants/:pid', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // Add an expense
-app.post('/api/trips/:id/expenses', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+app.post('/api/trips/:id/expenses', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
-  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
+    const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
 
-  if (!description || typeof description !== 'string' || !description.trim()) {
-    return res.status(400).json({ error: 'Expense description is required' });
-  }
-  if (typeof amount !== 'number' || amount <= 0) {
-    return res.status(400).json({ error: 'Amount must be a positive number' });
-  }
-  if (!trip.participants.find((p) => p.id === paidBy)) {
-    return res.status(400).json({ error: 'paidBy must be a valid participant' });
-  }
-  if (
-    !Array.isArray(splitBetween) ||
-    splitBetween.length === 0 ||
-    !splitBetween.every((id) => trip.participants.find((p) => p.id === id))
-  ) {
-    return res.status(400).json({ error: 'splitBetween must list valid participants' });
-  }
-
-  const expense = {
-    id: uuidv4(),
-    description: description.trim(),
-    amount,
-    paidBy,
-    splitBetween,
-    date: date || new Date().toISOString().split('T')[0],
-    createdAt: new Date().toISOString(),
-  };
-  if (category !== undefined) expense.category = String(category).trim();
-
-  if (originalCurrency && originalCurrency !== trip.currency) {
-    expense.originalCurrency = originalCurrency;
-    expense.originalAmount = typeof originalAmount === 'number' ? originalAmount : amount;
-    expense.convertedAmount = typeof convertedAmount === 'number' ? convertedAmount : amount;
-  }
-  trip.expenses.push(expense);
-  saveData(data);
-  res.status(201).json(expense);
-});
-
-// Update an expense
-app.put('/api/trips/:id/expenses/:eid', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const expense = trip.expenses.find((e) => e.id === req.params.eid);
-  if (!expense) return res.status(404).json({ error: 'Expense not found' });
-
-  const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
-  if (description !== undefined) expense.description = description.trim();
-  if (amount !== undefined) {
+    if (!description || typeof description !== 'string' || !description.trim()) {
+      return res.status(400).json({ error: 'Expense description is required' });
+    }
     if (typeof amount !== 'number' || amount <= 0) {
       return res.status(400).json({ error: 'Amount must be a positive number' });
     }
-    expense.amount = amount;
-  }
-  if (paidBy !== undefined) {
     if (!trip.participants.find((p) => p.id === paidBy)) {
       return res.status(400).json({ error: 'paidBy must be a valid participant' });
     }
-    expense.paidBy = paidBy;
-  }
-  if (splitBetween !== undefined) {
     if (
       !Array.isArray(splitBetween) ||
       splitBetween.length === 0 ||
@@ -355,49 +584,100 @@ app.put('/api/trips/:id/expenses/:eid', (req, res) => {
     ) {
       return res.status(400).json({ error: 'splitBetween must list valid participants' });
     }
-    expense.splitBetween = splitBetween;
-  }
-  if (date !== undefined) expense.date = date;
-  if (category !== undefined) expense.category = String(category).trim();
 
-  if (originalCurrency !== undefined) {
+    const expense = {
+      id: uuidv4(),
+      description: description.trim(),
+      amount,
+      paidBy,
+      splitBetween,
+      date: date || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+    };
+    if (category !== undefined) expense.category = String(category).trim();
+
     if (originalCurrency && originalCurrency !== trip.currency) {
       expense.originalCurrency = originalCurrency;
-      if (typeof originalAmount === 'number') expense.originalAmount = originalAmount;
-      if (typeof convertedAmount === 'number') expense.convertedAmount = convertedAmount;
-    } else {
-      // Currency changed back to trip currency — clear conversion fields
-      delete expense.originalCurrency;
-      delete expense.originalAmount;
-      delete expense.convertedAmount;
+      expense.originalAmount = typeof originalAmount === 'number' ? originalAmount : amount;
+      expense.convertedAmount = typeof convertedAmount === 'number' ? convertedAmount : amount;
     }
+    const created = await db.addExpense(req.params.id, expense);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('POST /api/trips/:id/expenses error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
+});
 
-  saveData(data);
-  res.json(expense);
+// Update an expense
+app.put('/api/trips/:id/expenses/:eid', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const { description, amount, paidBy, splitBetween, date, category, originalCurrency, originalAmount, convertedAmount } = req.body;
+
+    // Validate fields if provided
+    if (amount !== undefined && (typeof amount !== 'number' || amount <= 0)) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+    if (paidBy !== undefined && !trip.participants.find((p) => p.id === paidBy)) {
+      return res.status(400).json({ error: 'paidBy must be a valid participant' });
+    }
+    if (splitBetween !== undefined) {
+      if (!Array.isArray(splitBetween) || splitBetween.length === 0 ||
+          !splitBetween.every((id) => trip.participants.find((p) => p.id === id))) {
+        return res.status(400).json({ error: 'splitBetween must list valid participants' });
+      }
+    }
+
+    const fields = {};
+    if (description !== undefined) fields.description = description.trim();
+    if (amount !== undefined) fields.amount = amount;
+    if (paidBy !== undefined) fields.paidBy = paidBy;
+    if (splitBetween !== undefined) fields.splitBetween = splitBetween;
+    if (date !== undefined) fields.date = date;
+    if (category !== undefined) fields.category = String(category).trim();
+    if (originalCurrency !== undefined) {
+      fields.originalCurrency = originalCurrency;
+      fields.originalAmount = originalAmount;
+      fields.convertedAmount = convertedAmount;
+    }
+
+    const updated = await db.updateExpense(req.params.id, req.params.eid, fields);
+    if (!updated) return res.status(404).json({ error: 'Expense not found' });
+    res.json(updated);
+  } catch (err) {
+    console.error('PUT /api/trips/:id/expenses/:eid error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Delete an expense
-app.delete('/api/trips/:id/expenses/:eid', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  const eidx = trip.expenses.findIndex((e) => e.id === req.params.eid);
-  if (eidx === -1) return res.status(404).json({ error: 'Expense not found' });
-  trip.expenses.splice(eidx, 1);
-  saveData(data);
-  res.status(204).end();
+app.delete('/api/trips/:id/expenses/:eid', async (req, res) => {
+  try {
+    const deleted = await db.deleteExpense(req.params.id, req.params.eid);
+    if (!deleted) return res.status(404).json({ error: 'Expense not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('DELETE /api/trips/:id/expenses/:eid error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ---------------------------------------------------------------------------
 // API Routes — Balances
 // ---------------------------------------------------------------------------
 
-app.get('/api/trips/:id/balances', (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
-  if (!trip) return res.status(404).json({ error: 'Trip not found' });
-  res.json(calculateBalances(trip));
+app.get('/api/trips/:id/balances', async (req, res) => {
+  try {
+    const trip = await db.getTrip(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    res.json(calculateBalances(trip));
+  } catch (err) {
+    console.error('GET /api/trips/:id/balances error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -456,8 +736,7 @@ app.get('/api/ai-enabled', (req, res) => {
 
 // Parse a natural-language message into structured expense(s)
 app.post('/api/trips/:id/parse-expense', async (req, res) => {
-  const data = loadData();
-  const trip = data.trips.find((t) => t.id === req.params.id);
+  const trip = await db.getTrip(req.params.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
   const { message } = req.body;
@@ -537,8 +816,6 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
     }
 
     // Map participant names to IDs (case-insensitive fuzzy match), auto-creating if not found.
-    // `participantsChanged` is local to this request handler invocation (per-request scope).
-    let participantsChanged = false;
 
     function findParticipant(name) {
       const lower = (name || '').toLowerCase().trim();
@@ -550,27 +827,38 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       );
     }
 
-    function findOrCreateParticipant(name) {
+    async function findOrCreateParticipant(name) {
       const trimmed = (name || '').trim();
       if (!trimmed) return null;
       const existing = findParticipant(trimmed);
       if (existing) return existing;
       const newParticipant = { id: uuidv4(), name: trimmed };
-      trip.participants.push(newParticipant);
-      participantsChanged = true;
-      return newParticipant;
+      const participant = await db.addParticipant(req.params.id, newParticipant);
+      if (!participant) {
+        console.error(`Failed to persist parsed participant "${trimmed}" for trip ${req.params.id}`);
+        return null;
+      }
+      trip.participants.push(participant);
+      return participant;
     }
 
-    const expenses = parsed.map((item) => {
-      const payer = findOrCreateParticipant(item.paidBy);
+    const expenses = [];
+    for (const item of parsed) {
+      const payer = await findOrCreateParticipant(item.paidBy);
       // Default to ALL current participants (including any newly created payer) when omitted
-      const splitParticipants = (Array.isArray(item.splitBetween) && item.splitBetween.length > 0)
-        ? item.splitBetween.map(findOrCreateParticipant).filter(Boolean)
-        : trip.participants.slice();
+      const splitParticipants = [];
+      if (Array.isArray(item.splitBetween) && item.splitBetween.length > 0) {
+        for (const n of item.splitBetween) {
+          const p = await findOrCreateParticipant(n);
+          if (p) splitParticipants.push(p);
+        }
+      } else {
+        splitParticipants.push(...trip.participants.slice());
+      }
       // Normalize and validate currency; fall back to trip currency if invalid
       const rawCurrency = (item.currency || '').trim().toUpperCase();
       const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : trip.currency;
-      return {
+      expenses.push({
         description: String(item.description || '').trim(),
         amount: Number(item.amount) || 0,
         paidBy: payer ? payer.id : null,
@@ -579,11 +867,7 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
         splitBetweenNames: splitParticipants.map((p) => p.name),
         date: item.date || lastExpenseDate,
         currency,
-      };
-    });
-
-    if (participantsChanged) {
-      saveData(data);
+      });
     }
 
     res.json({ expenses });
@@ -604,9 +888,12 @@ app.get('/{*path}', (req, res) => {
 // Start (only when run directly, not when required as a module)
 // ---------------------------------------------------------------------------
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`🍌 banana/splitt is running at http://localhost:${PORT}`);
-  });
+  (async () => {
+    await db.init();
+    app.listen(PORT, () => {
+      console.log(`🍌 banana/splitt is running at http://localhost:${PORT}`);
+    });
+  })();
 }
 
-module.exports = { app, calculateBalances };
+module.exports = { app, calculateBalances, db };
