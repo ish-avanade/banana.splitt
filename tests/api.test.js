@@ -71,13 +71,14 @@ function makeTempDataFile() {
 }
 
 function loadFreshServer(envOverrides = {}) {
-  const envKeys = ['DATA_FILE_OVERRIDE', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
-  const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const serverEnvKeys = ['DATA_FILE_OVERRIDE', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
+  const authEnvKeys = ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
+  const previousEnv = Object.fromEntries(serverEnvKeys.map((key) => [key, process.env[key]]));
   const tempData = makeTempDataFile();
 
   process.env.DATA_FILE_OVERRIDE = tempData.file;
-  for (const key of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET']) {
-    if (Object.prototype.hasOwnProperty.call(envOverrides, key)) {
+  for (const key of authEnvKeys) {
+    if (Object.hasOwn(envOverrides, key)) {
       process.env[key] = envOverrides[key];
     } else {
       delete process.env[key];
