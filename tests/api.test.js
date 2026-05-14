@@ -48,8 +48,8 @@ async function doReq(base, method, path, body, headers = {}) {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
   };
+  // Prefer node-fetch when available, but fall back to the built-in fetch on Node 18+.
   const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
-  // Fall back to native fetch (Node 18+)
   const fetchFn = fetch || globalThis.fetch;
   const res = await fetchFn(url.toString(), {
     ...opts,
@@ -72,7 +72,7 @@ function makeTempDataFile() {
 
 function loadFreshServer(envOverrides = {}) {
   const serverEnvKeys = ['DATA_FILE_OVERRIDE', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
-  const authEnvKeys = ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'JWT_SECRET'];
+  const authEnvKeys = serverEnvKeys.filter((key) => key !== 'DATA_FILE_OVERRIDE');
   const previousEnv = Object.fromEntries(serverEnvKeys.map((key) => [key, process.env[key]]));
   const tempData = makeTempDataFile();
 
@@ -97,7 +97,7 @@ function loadFreshServer(envOverrides = {}) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
-      try { fs.rmSync(tempData.dir, { recursive: true }); } catch { /* ignore */ }
+      try { fs.rmSync(tempData.dir, { recursive: true }); } catch { /* ignore: temp dir may already be removed */ }
     },
   };
 }
