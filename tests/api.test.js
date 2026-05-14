@@ -48,7 +48,7 @@ async function doReq(base, method, path, body, headers = {}) {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
   };
-  // Prefer node-fetch when available, but fall back to the built-in fetch on Node 18+.
+  // Prefers node-fetch when available, but falls back to the built-in fetch on Node 18+.
   const { default: fetch } = await import('node-fetch').catch(() => ({ default: null }));
   const fetchFn = fetch || globalThis.fetch;
   const res = await fetchFn(url.toString(), {
@@ -679,7 +679,7 @@ describe('Auth-enabled API', () => {
   let authServer;
   let authBaseUrl;
   let cleanupAuthServer;
-  const authReq = (method, reqPath, body, headers = {}) => doReq(authBaseUrl, method, reqPath, body, headers);
+  const authReq = (method, path, body, headers = {}) => doReq(authBaseUrl, method, path, body, headers);
 
   before(() => {
     const { app: authApp, cleanup } = loadFreshServer({
