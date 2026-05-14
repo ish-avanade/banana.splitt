@@ -182,7 +182,7 @@ async function removeParticipant(tripId, participantId) {
     .query(`
       SELECT COUNT(*) AS cnt FROM expenses WHERE tripId = @tripId AND paidBy = @pid
       UNION ALL
-      SELECT COUNT(*) FROM expense_splits es
+      SELECT COUNT(*) AS cnt FROM expense_splits es
       INNER JOIN expenses e ON e.id = es.expenseId
       WHERE e.tripId = @tripId AND es.participantId = @pid
     `);
@@ -278,6 +278,7 @@ async function updateExpense(tripId, expenseId, fields) {
 
     await transaction.request()
       .input('id', sql.NVarChar, expenseId)
+      .input('tripId', sql.NVarChar, tripId)
       .input('description', sql.NVarChar, updated.description)
       .input('amount', sql.Float, updated.amount)
       .input('paidBy', sql.NVarChar, updated.paidBy)
@@ -289,7 +290,7 @@ async function updateExpense(tripId, expenseId, fields) {
       .query(`UPDATE expenses SET description=@description, amount=@amount, paidBy=@paidBy,
               date=@date, category=@category, originalCurrency=@originalCurrency,
               originalAmount=@originalAmount, convertedAmount=@convertedAmount
-              WHERE id=@id`);
+              WHERE id=@id AND tripId=@tripId`);
 
     if (fields.splitBetween !== undefined) {
       await transaction.request()

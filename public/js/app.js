@@ -58,18 +58,14 @@ function renderAuthUI() {
       location.reload();
     });
   } else {
-    const clientId = authState.clientId || '';
-    const redirectUri = encodeURIComponent(location.origin + '/auth/github/callback');
-    const ghUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:user`;
+    const ghUrl = '/auth/github';
     userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small">Sign in with GitHub</a>`;
   }
 }
 
 function showLoginPage() {
   const main = document.getElementById('main-content');
-  const clientId = authState.clientId || '';
-  const redirectUri = encodeURIComponent(location.origin + '/auth/github/callback');
-  const ghUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:user`;
+  const ghUrl = '/auth/github';
   main.innerHTML = `
     <section class="page login-page">
       <div class="login-box">
@@ -1951,7 +1947,7 @@ function showAddMemberModal(trip, onSuccess) {
       return;
     }
     if (dupes.length > 0) {
-      toast(`Skipped duplicate${dupes.length > 1 ? 's' : ''}: ${dupes.map(d => escHtml(d)).join(', ')}`, 'warning');
+      toast(`Skipped duplicate${dupes.length > 1 ? 's' : ''}: ${dupes.join(', ')}`, 'warning');
     }
     if (toAdd.length === 0) return;
 
@@ -1961,7 +1957,7 @@ function showAddMemberModal(trip, onSuccess) {
       }
       closeModal();
       if (toAdd.length === 1) {
-        toast(`${escHtml(toAdd[0])} added 👋`, 'success');
+        toast(`${toAdd[0]} added 👋`, 'success');
       } else {
         toast(`${toAdd.length} members added 👋`, 'success');
       }

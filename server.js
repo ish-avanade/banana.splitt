@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 
@@ -259,13 +260,25 @@ if (AUTH_ENABLED && JWT_SECRET === 'dev-secret-change-me') {
   process.exit(1);
 }
 const COOKIE_NAME = 'bs_token';
+const AUTH_STATE_COOKIE = 'bs_auth_state';
+const isSecureCookie = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod' || !!process.env.WEBSITE_SITE_NAME;
 
 function setAuthCookie(res, token) {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod' || !!process.env.WEBSITE_SITE_NAME,
+    secure: isSecureCookie,
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
+  });
+}
+
+function setAuthStateCookie(res, state) {
+  res.cookie(AUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: isSecureCookie,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000, // 10 minutes
     path: '/',
   });
 }
@@ -275,7 +288,13 @@ function parseCookies(req) {
   const cookies = {};
   header.split(';').forEach((c) => {
     const [k, ...v] = c.split('=');
-    if (k) cookies[k.trim()] = decodeURIComponent(v.join('=').trim());
+    if (!k) return;
+    const value = v.join('=').trim();
+    try {
+      cookies[k.trim()] = decodeURIComponent(value);
+    } catch {
+      cookies[k.trim()] = value;
+    }
   });
   return cookies;
 }
@@ -307,10 +326,30 @@ app.get('/auth/me', (req, res) => {
   }
 });
 
+app.get('/auth/github', (req, res) => {
+  if (!AUTH_ENABLED) return res.redirect('/');
+  const state = crypto.randomBytes(32).toString('hex');
+  setAuthStateCookie(res, state);
+  const redirectUri = `${req.protocol}://${req.get('host')}/auth/github/callback`;
+  const ghUrl = `https://github.com/login/oauth/authorize?${new URLSearchParams({
+    client_id: GITHUB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: 'read:user',
+    state,
+  }).toString()}`;
+  return res.redirect(ghUrl);
+});
+
 // GitHub OAuth callback
 app.get('/auth/github/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   if (!code) return res.status(400).send('Missing code parameter');
+  const cookies = parseCookies(req);
+  const expectedState = cookies[AUTH_STATE_COOKIE];
+  res.clearCookie(AUTH_STATE_COOKIE, { path: '/' });
+  if (!state || !expectedState || state !== expectedState) {
+    return res.status(400).send('Invalid auth state');
+  }
 
   try {
     // Exchange code for access token
