@@ -833,9 +833,10 @@ app.post('/api/trips/:id/parse-expense', async (req, res) => {
       const existing = findParticipant(trimmed);
       if (existing) return existing;
       const newParticipant = { id: uuidv4(), name: trimmed };
-      trip.participants.push(newParticipant);
-      await db.addParticipant(req.params.id, newParticipant);
-      return newParticipant;
+      const participant = await db.addParticipant(req.params.id, newParticipant);
+      if (!participant) return null;
+      trip.participants.push(participant);
+      return participant;
     }
 
     const expenses = [];

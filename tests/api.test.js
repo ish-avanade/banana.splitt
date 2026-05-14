@@ -605,7 +605,11 @@ describe('AI parse-expense', () => {
 
       // Verify the new participant persists in the trip
       const { body: trip } = await req('GET', `/api/trips/${tripId}`);
-      assert.ok(trip.participants.some((p) => p.name === 'Ish'), 'Ish should be persisted as a participant');
+      assert.equal(
+        trip.participants.filter((p) => p.name === 'Ish').length,
+        1,
+        'Ish should be persisted exactly once as a participant'
+      );
     } finally {
       delete process.env.MOCK_AI_RESPONSE;
       // Remove the auto-created participant to keep state clean for other tests
