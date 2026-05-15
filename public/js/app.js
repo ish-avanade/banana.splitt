@@ -50,16 +50,17 @@ function renderAuthUI() {
   }
   if (authState.authenticated && authState.user) {
     const u = authState.user;
-    const name = escHtml(u.name || u.login);
+    const userName = u.name || u.login;
+    const name = escHtml(userName);
     const avatar = u.avatar ? `<img src="${escAttr(u.avatar)}" alt="" class="user-avatar" width="28" height="28">` : '';
-    userEl.innerHTML = `${avatar}<span class="user-name">${name}</span><button class="btn btn-small btn-logout" id="btn-logout">Logout</button>`;
+    userEl.innerHTML = `${avatar}<span class="user-name" title="${escAttr(userName)}">${name}</span><button class="btn btn-small btn-logout auth-logout-btn" id="btn-logout"><span class="logout-label">Logout</span><span class="logout-short-label" aria-hidden="true">Out</span></button>`;
     document.getElementById('btn-logout').addEventListener('click', async () => {
       await fetch('/auth/logout', { method: 'POST' });
       location.reload();
     });
   } else {
     const ghUrl = '/auth/github';
-    userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small">Sign in with GitHub</a>`;
+    userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small auth-login-btn"><span class="login-label-long">Sign in with GitHub</span><span class="login-label-short">Sign in</span></a>`;
   }
 }
 
@@ -156,11 +157,13 @@ function render() {
 function setBreadcrumb(items) {
   const el = document.getElementById('breadcrumb');
   el.innerHTML = items
-    .map((item, i) =>
-      i < items.length - 1
-        ? `<a href="${item.href}">${item.label}</a><span>/</span>`
-        : `<span>${item.label}</span>`
-    )
+    .map((item, i) => {
+      const safeLabel = escHtml(item.label || '');
+      if (i < items.length - 1) {
+        return `<a class="breadcrumb-item breadcrumb-item-parent" href="${escAttr(item.href || '#')}">${safeLabel}</a><span class="breadcrumb-separator" aria-hidden="true">/</span>`;
+      }
+      return `<span class="breadcrumb-item breadcrumb-current" aria-current="page">${safeLabel}</span>`;
+    })
     .join('');
 }
 
