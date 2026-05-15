@@ -745,7 +745,7 @@ main#main-content {
     flex-wrap: wrap;
   }
   .logo-text { font-size: 1.05rem; }
-  .header-user { margin-left: auto; max-width: 100%; }
+  .header-user { margin-left: auto; }
   .breadcrumb {
     order: 3;
     flex: 0 0 100%;
@@ -754,15 +754,16 @@ main#main-content {
     overflow: hidden;
     white-space: nowrap;
   }
-  .breadcrumb > *:nth-child(-n+2) { display: none; }
-  .breadcrumb > * {
+  .breadcrumb-item-parent,
+  .breadcrumb-separator { display: none; }
+  .breadcrumb-item {
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .tabs { margin-bottom: 1rem; }
   .tabs {
+    margin-bottom: 1rem;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
@@ -794,9 +795,9 @@ main#main-content {
   .expense-desc {
     white-space: normal;
     line-height: 1.35;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
-  .expense-meta { font-size: .76rem; overflow-wrap: anywhere; }
+  .expense-meta { font-size: .82rem; overflow-wrap: break-word; }
   .expense-amount {
     margin-left: auto;
     min-width: 0;
@@ -814,7 +815,7 @@ main#main-content {
     padding: .8rem .9rem;
     font-size: .84rem;
   }
-  .settlement-from, .settlement-to { min-width: 0; overflow-wrap: anywhere; }
+  .settlement-from, .settlement-to { min-width: 0; overflow-wrap: break-word; }
   .settlement-amount {
     margin-left: 0;
     width: 100%;
@@ -962,7 +963,7 @@ main#main-content {
   border-color: var(--red);
 }
 .auth-logout-btn { gap: .35rem; }
-.logout-icon { display: none; }
+.logout-short-label { display: none; }
 .login-label-short { display: none; }
 .login-page {
   display: flex;
@@ -1003,5 +1004,5 @@ main#main-content {
   .login-label-long { display: none; }
   .login-label-short { display: inline; }
   .auth-logout-btn .logout-label { display: none; }
-  .logout-icon { display: inline; }
+  .logout-short-label { display: inline; }
 }
