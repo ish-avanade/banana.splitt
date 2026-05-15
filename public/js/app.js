@@ -52,14 +52,14 @@ function renderAuthUI() {
     const u = authState.user;
     const name = escHtml(u.name || u.login);
     const avatar = u.avatar ? `<img src="${escAttr(u.avatar)}" alt="" class="user-avatar" width="28" height="28">` : '';
-    userEl.innerHTML = `${avatar}<span class="user-name">${name}</span><button class="btn btn-small btn-logout" id="btn-logout">Logout</button>`;
+    userEl.innerHTML = `${avatar}<span class="user-name" title="${name}">${name}</span><button class="btn btn-small btn-logout auth-logout-btn" id="btn-logout" aria-label="Logout"><span class="logout-label">Logout</span><span class="logout-icon" aria-hidden="true">↪</span></button>`;
     document.getElementById('btn-logout').addEventListener('click', async () => {
       await fetch('/auth/logout', { method: 'POST' });
       location.reload();
     });
   } else {
     const ghUrl = '/auth/github';
-    userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small">Sign in with GitHub</a>`;
+    userEl.innerHTML = `<a href="${ghUrl}" class="btn btn-primary btn-small auth-login-btn"><span class="login-label-long">Sign in with GitHub</span><span class="login-label-short">Sign in</span></a>`;
   }
 }
 

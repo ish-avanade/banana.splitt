@@ -56,6 +56,7 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
+  min-width: 0;
 }
 .logo {
   display: flex;
@@ -81,6 +82,7 @@ body {
   font-size: .85rem;
   color: var(--text-muted);
   flex: 1;
+  min-width: 0;
 }
 .breadcrumb a {
   color: var(--yellow-dark);
@@ -735,6 +737,95 @@ main#main-content {
   .page-header .btn { width: 100%; justify-content: center; }
   .trips-grid { grid-template-columns: 1fr; }
   .modal-box { padding: 1.25rem; }
+  .header-inner {
+    height: auto;
+    padding-top: .55rem;
+    padding-bottom: .55rem;
+    gap: .4rem .7rem;
+    flex-wrap: wrap;
+  }
+  .logo-text { font-size: 1.05rem; }
+  .header-user { margin-left: auto; max-width: 100%; }
+  .breadcrumb {
+    order: 3;
+    flex: 0 0 100%;
+    font-size: .78rem;
+    line-height: 1.3;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .breadcrumb > *:nth-child(-n+2) { display: none; }
+  .breadcrumb > * {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tabs { margin-bottom: 1rem; }
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    overflow: visible;
+  }
+  .tab {
+    width: 100%;
+    padding: .55rem .35rem;
+    font-size: .8rem;
+    text-align: center;
+  }
+  .ai-chat-bar { padding: .9rem; margin-bottom: 1rem; }
+  .ai-chat-header { margin-bottom: .5rem; }
+  .dashboard-grid { gap: .6rem; margin-bottom: 1.4rem; }
+  .dash-card { padding: .85rem .9rem; }
+  .dash-card-value { font-size: 1.15rem; }
+  .share-section { margin-top: 1.1rem; gap: .55rem; }
+  .share-section .btn { width: 100%; justify-content: center; }
+  .expense-item {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: .65rem;
+    padding: .85rem .9rem;
+  }
+  .expense-body {
+    flex: 1 1 calc(100% - 3.2rem);
+    min-width: 0;
+  }
+  .expense-desc {
+    white-space: normal;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .expense-meta { font-size: .76rem; overflow-wrap: anywhere; }
+  .expense-amount {
+    margin-left: auto;
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+  .expense-actions {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .settlement-item {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .45rem;
+    padding: .8rem .9rem;
+    font-size: .84rem;
+  }
+  .settlement-from, .settlement-to { min-width: 0; overflow-wrap: anywhere; }
+  .settlement-amount {
+    margin-left: 0;
+    width: 100%;
+    font-size: .92rem;
+    order: 3;
+  }
+  .settlement-remind-btn {
+    margin-left: auto;
+    margin-top: .1rem;
+    order: 4;
+  }
 }
 
 /* ---- AI chat bar ------------------------------------------ */
@@ -841,6 +932,7 @@ main#main-content {
   display: flex;
   align-items: center;
   gap: .5rem;
+  min-width: 0;
 }
 .user-avatar {
   border-radius: 50%;
@@ -850,6 +942,10 @@ main#main-content {
   font-size: .875rem;
   font-weight: 500;
   color: var(--text-muted);
+  max-width: 12rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .btn-small {
   padding: .35rem .75rem;
@@ -865,6 +961,9 @@ main#main-content {
   color: var(--red);
   border-color: var(--red);
 }
+.auth-logout-btn { gap: .35rem; }
+.logout-icon { display: none; }
+.login-label-short { display: none; }
 .login-page {
   display: flex;
   justify-content: center;
@@ -897,4 +996,12 @@ main#main-content {
   gap: .5rem;
   padding: .75rem 1.5rem;
   font-size: 1rem;
+}
+@media (max-width: 420px) {
+  .user-name { max-width: 7rem; }
+  .auth-login-btn { padding: .35rem .6rem; }
+  .login-label-long { display: none; }
+  .login-label-short { display: inline; }
+  .auth-logout-btn .logout-label { display: none; }
+  .logout-icon { display: inline; }
 }
