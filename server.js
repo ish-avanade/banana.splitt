@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+app.set('trust proxy', 1); // trust first proxy (Azure App Service / load balancer)
 const PORT = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------------
