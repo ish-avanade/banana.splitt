@@ -2030,6 +2030,7 @@ async function initAiChat(trip, tripId) {
         return;
       }
 
+      const existingText = input.value.trim();
       recognition = new SpeechRecognition();
       recognition.lang = 'en-US';
       recognition.interimResults = true;
@@ -2040,7 +2041,8 @@ async function initAiChat(trip, tripId) {
         micBtn.setAttribute('aria-label', 'Stop listening');
       };
       recognition.onresult = (e) => {
-        input.value = Array.from(e.results).map(r => r[0].transcript).join('');
+        const transcript = Array.from(e.results).map(result => result[0].transcript).join('');
+        input.value = existingText ? `${existingText} ${transcript}`.trim() : transcript;
       };
       recognition.onend = () => {
         listening = false;
