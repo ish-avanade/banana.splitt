@@ -2016,6 +2016,49 @@ async function initAiChat(trip, tripId) {
   const input   = document.getElementById('ai-chat-input');
   const results = document.getElementById('ai-parsed-results');
   const sendBtn = form.querySelector('.ai-chat-send');
+  const micBtn = document.getElementById('ai-mic-btn');
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (SpeechRecognition && micBtn) {
+    micBtn.classList.remove('hidden');
+    let recognition = null;
+    let listening = false;
+
+    micBtn.addEventListener('click', () => {
+      if (listening && recognition) {
+        recognition.stop();
+        return;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => {
+        listening = true;
+        micBtn.classList.add('ai-mic-listening');
+        micBtn.setAttribute('aria-label', 'Stop listening');
+      };
+      recognition.onresult = (e) => {
+        input.value = Array.from(e.results).map(r => r[0].transcript).join('');
+      };
+      recognition.onend = () => {
+        listening = false;
+        micBtn.classList.remove('ai-mic-listening');
+        micBtn.setAttribute('aria-label', 'Speak to add expense');
+      };
+      recognition.onerror = (e) => {
+        listening = false;
+        micBtn.classList.remove('ai-mic-listening');
+        micBtn.setAttribute('aria-label', 'Speak to add expense');
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          toast('Microphone error — check browser permissions.', 'error');
+        }
+      };
+
+      recognition.start();
+    });
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
