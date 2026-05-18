@@ -145,7 +145,11 @@
             maxlength="500"
             autocomplete="off"
           />
-          <button type="submit" class="btn btn-primary ai-chat-send">Send</button>
+          <div class="ai-chat-actions">
+            <button type="button" class="btn btn-secondary ai-mic-btn hidden"
+              id="ai-mic-btn" aria-label="Speak to add expense" title="Use microphone">🎤</button>
+            <button type="submit" class="btn btn-primary ai-chat-send">Send</button>
+          </div>
         </form>
         <div id="ai-parsed-results" class="ai-parsed-results"></div>
       </div>

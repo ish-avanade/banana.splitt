@@ -869,8 +869,20 @@ main#main-content {
   border-color: var(--yellow-dark);
   box-shadow: 0 0 0 3px rgba(217,119,6,.15);
 }
-.ai-chat-send { padding: .6rem 1rem; flex-shrink: 0; }
+.ai-chat-actions { display: flex; gap: .5rem; flex-shrink: 0; }
+.ai-chat-send { padding: .6rem 1rem; }
 .ai-chat-send:disabled { opacity: .6; cursor: not-allowed; }
+.ai-mic-btn { padding: .6rem .75rem; font-size: 1rem; flex-shrink: 0; }
+.ai-mic-btn.ai-mic-listening {
+  background: var(--red-light);
+  border-color: var(--red);
+  color: var(--red);
+  animation: micPulse 1s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.4); }
+  50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
 
 .ai-parsed-results {
   display: flex;
@@ -924,7 +936,8 @@ main#main-content {
 }
 @media (max-width: 600px) {
   .ai-chat-form { flex-direction: column; }
-  .ai-chat-send { width: 100%; justify-content: center; }
+  .ai-chat-actions { width: 100%; }
+  .ai-chat-send { flex: 1; justify-content: center; }
 }
 
 /* ---- Auth / Login ----------------------------------------- */
